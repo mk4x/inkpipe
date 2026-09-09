@@ -65,11 +65,26 @@ export interface PageDraft {
   imageDataUrl: string;
 }
 
+/** ADR 0003 and ADR 0004. Everything the model added that is not on the page,
+ *  with how much it should be trusted. `disputed` means the sources contradict
+ *  the page, which usually means the page is wrong. */
+export interface Expansion {
+  term: string;
+  text: string;
+  confidence: 'high' | 'low' | 'unsupported' | 'disputed' | 'contradicted' | 'refused' | 'sourced';
+  reason: string | null;
+  agreement: number | null;
+  sources: Array<{ title: string; url: string }>;
+}
+
 export interface Draft {
   sessionId: string;
   suggestedTitle: string;
   course: string;
   pages: PageDraft[];
+  /** Absent when expansion is switched off. */
+  expansions?: Expansion[];
+  expansionError?: string | null;
 }
 
 export interface OllamaStatus {

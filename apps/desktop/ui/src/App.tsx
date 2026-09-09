@@ -187,6 +187,11 @@ function Preview({ draft, onClose, onApproved }: {
   const [title, setTitle] = useState(draft.suggestedTitle);
   const [course, setCourse] = useState(draft.course);
   const [pages, setPages] = useState(draft.pages.map((p) => p.markdown));
+  // Issue #8. Good unless the reader says otherwise, so approving without an
+  // opinion still works and simply records no complaint.
+  const [verdicts, setVerdicts] = useState<Array<'good' | 'bad'>>(
+    draft.pages.map(() => 'good'),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -194,22 +199,18 @@ function Preview({ draft, onClose, onApproved }: {
     setBusy(true);
     setError(null);
     try {
-      // Terms the user typed that the model did not produce become glossary
-      // candidates. This is the whole feedback loop: corrections make the next
-      // transcription better AND become regression cases.
-      const original = draft.pages.map((p) => p.markdown).join(' ').toLowerCase();
-      const glossaryTerms = Array.from(new Set(
-        pages.join(' ')
-          .split(/[^A-Za-z()._-]+/)
-          .filter((w) => w.length >= 4 && w.length <= 40)
-          .filter((w) => !original.includes(w.toLowerCase())),
-      )).slice(0, 25);
-
+      // Corrections are derived on the server, by diffing this text against
+      // what the model produced. An earlier version did it here by splitting
+      // on punctuation with no noise filter, which put words like "the" into
+      // the glossary.
       await api.approve(draft.sessionId, {
         title: title.trim(),
         course: course.trim(),
-        pages: draft.pages.map((p, i) => ({ blobId: p.blobId, markdown: pages[i] })),
-        glossaryTerms,
+        pages: draft.pages.map((p, i) => ({
+          blobId: p.blobId,
+          markdown: pages[i],
+          verdict: verdicts[i],
+        })),
       });
       onApproved();
     } catch (e) {
@@ -246,18 +247,82 @@ function Preview({ draft, onClose, onApproved }: {
           index={i}
           total={draft.pages.length}
           value={pages[i]}
+          verdict={verdicts[i]}
+          onVerdict={(v) => setVerdicts((prev) => prev.map((p, j) => (j === i ? v : p)))}
           onChange={(v) => setPages((prev) => prev.map((p, j) => (j === i ? v : p)))}
         />
       ))}
+
+      <Explanations draft={draft} />
     </section>
   );
 }
 
-function PagePane({ page, index, total, value, onChange }: {
+/**
+ * What the model added, shown before it reaches the vault.
+ *
+ * Decision 21 made this a full editor and CLAUDE.md rule 7 says nothing reaches
+ * the vault without a human. Explanations were going into the written note
+ * without ever appearing on this screen, which quietly broke both. The
+ * disputed ones matter most: they mean the sources contradict the page, which
+ * usually means the page is wrong.
+ */
+function Explanations({ draft }: { draft: Draft }) {
+  const expansions = draft.expansions ?? [];
+  if (expansions.length === 0 && !draft.expansionError) return null;
+
+  const flagged = expansions.filter(
+    (e) => e.confidence === 'disputed' || e.confidence === 'unsupported',
+  );
+
+  return (
+    <div className="pane">
+      <div className="pane-head">
+        <strong>Explanations</strong>
+        <span className="muted">added by the model, not on your page</span>
+        {flagged.length > 0 && (
+          <span className="warn">{flagged.length} need checking</span>
+        )}
+      </div>
+      <div className="explanations">
+        {draft.expansionError && (
+          <p className="warn">These could not be generated: {draft.expansionError}</p>
+        )}
+        {expansions.map((e) => (
+          <div key={e.term} className={`expansion ${e.confidence}`}>
+            <strong>{e.term}</strong>
+            <span className="muted"> {e.confidence}</span>
+            {e.text && <p>{e.text}</p>}
+            {e.reason && <p className="muted">{e.reason}</p>}
+            {e.sources.length > 0 && (
+              <p className="muted">
+                Sources: {e.sources.map((s) => hostOf(s.url)).join(', ')}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Bare hostname. These URLs came from a search engine, so they are named
+ *  rather than linked: CLAUDE.md rule 5, generated content stays inert. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+function PagePane({ page, index, total, value, verdict, onVerdict, onChange }: {
   page: PageDraft;
   index: number;
   total: number;
   value: string;
+  verdict: 'good' | 'bad';
+  onVerdict: (v: 'good' | 'bad') => void;
   onChange: (v: string) => void;
 }) {
   return (
@@ -270,6 +335,16 @@ function PagePane({ page, index, total, value, onChange }: {
         {page.sanitiserChanges.length > 0 && (
           <span className="warn">altered for safety: {page.sanitiserChanges.join('; ')}</span>
         )}
+        <div className="spacer" />
+        {/* Issue #8. A rejected page becomes a golden corpus candidate, which
+            is what the corpus is short of: pages the pipeline got wrong. */}
+        <button
+          className={verdict === 'bad' ? 'verdict active' : 'verdict'}
+          onClick={() => onVerdict(verdict === 'bad' ? 'good' : 'bad')}
+          title="Mark this page as badly transcribed, so it becomes a test case"
+        >
+          {verdict === 'bad' ? 'Marked as bad' : 'This came out wrong'}
+        </button>
       </div>
       <div className="pane-body">
         {/* The photograph sits beside the text so a wrong transcription is

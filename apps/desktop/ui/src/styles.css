@@ -163,3 +163,40 @@ small { color: var(--muted); font-size: 12px; }
 .check input { width: 16px; height: 16px; margin-top: 2px; }
 
 .qr { border-radius: 8px; background: #fff; padding: 10px; }
+
+/* Feedback and explanations (issue #8, ADR 0004). */
+
+button.verdict {
+  font-size: 0.85em;
+  padding: 0.2rem 0.6rem;
+}
+
+button.verdict.active {
+  background: #7a2d2d;
+  color: #fff;
+  border-color: #7a2d2d;
+}
+
+.explanations {
+  padding: 0.75rem 1rem;
+}
+
+.expansion {
+  border-left: 3px solid #444;
+  padding: 0.35rem 0 0.35rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.expansion p {
+  margin: 0.25rem 0;
+}
+
+/* Confidence is shown as colour as well as words, because the whole point is
+   that a reader can tell at a glance what to check. */
+.expansion.high { border-left-color: #3d7a3d; }
+.expansion.low { border-left-color: #7a6a2d; }
+.expansion.sourced { border-left-color: #2d5a7a; }
+.expansion.unsupported { border-left-color: #7a4d2d; }
+.expansion.disputed { border-left-color: #7a2d2d; }
+.expansion.refused,
+.expansion.contradicted { border-left-color: #555; opacity: 0.75; }
