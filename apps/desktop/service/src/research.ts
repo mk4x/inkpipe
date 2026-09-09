@@ -142,8 +142,20 @@ export class ResearchUnavailable extends Error {
  */
 export function researchBlocker(config: Config, secretsPath?: string): string | null {
   if (!config.research.enabled) return 'research is switched off';
-  if (!config.research.cx) return 'no Programmable Search Engine id is configured';
-  if (!loadSecrets(secretsPath).searchApiKey) return 'no search API key has been saved';
+
+  if (config.research.provider === 'google') {
+    if (!config.research.cx) return 'no Programmable Search Engine id is configured';
+    if (!loadSecrets(secretsPath).searchApiKey) return 'no search API key has been saved';
+    return null;
+  }
+
+  if (!config.research.host) return 'no SearXNG instance URL is configured';
+  // A remote instance without a token is an open search proxy for anyone who
+  // finds the hostname, so refuse rather than quietly publishing one.
+  const remote = !/^https?:\/\/(127\.0\.0\.1|localhost)([:/]|$)/.test(config.research.host);
+  if (remote && !loadSecrets(secretsPath).searxngToken) {
+    return 'no SearXNG token has been saved, and a remote instance requires one';
+  }
   return null;
 }
 
@@ -167,10 +179,13 @@ export function buildResearch(
 ): (ResearchOptions & { remaining(): number }) | null {
   if (researchBlocker(config, options.secretsPath)) return null;
 
+  const secrets = loadSecrets(options.secretsPath);
   const provider = options.provider ?? providerFromConfig({
     provider: config.research.provider,
-    apiKey: loadSecrets(options.secretsPath).searchApiKey,
+    apiKey: secrets.searchApiKey,
     cx: config.research.cx,
+    host: config.research.host,
+    token: secrets.searxngToken,
   });
 
   const store = fileResearchStore(
@@ -183,13 +198,16 @@ export function buildResearch(
 
   return {
     remaining: store.remaining,
-    async lookup(term: string) {
+    async lookup(term: string, course?: string) {
       try {
         const result = await lookup(term, {
           provider,
           cache: store.cache,
           budget: store.budget,
-          course: undefined,
+          // Measured on page F: without this, "Epsilon" searches for the Greek
+          // letter and the brand, and four of six terms found no relevant
+          // source at all. The course is a configured value, never model output.
+          course,
           limit: config.research.snippetsPerTerm,
           maxAgeMs,
         });

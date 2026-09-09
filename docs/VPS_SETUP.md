@@ -258,3 +258,94 @@ sizes and timestamps, and ciphertext they cannot read. They do not get your
 notes, your vault, or your GitHub credentials, because none of those are ever
 here. If you find yourself adding a feature that changes that sentence, stop and
 re-read `docs/PREPARATION.md` section 8.
+
+## Self-hosted search for expansion (ADR 0004)
+
+Expansion checks its explanations against web search snippets. The provider is
+SearXNG running on this server: it queries Google underneath, so the index is
+the same, and it needs no API key, no account, no quota and no billing.
+
+That last part is the reason it is here rather than using Google's own API.
+Four Google API keys across two Cloud projects were refused with a project level
+error while the console showed the API enabled and the project's own metrics
+showed the requests arriving. A backend that depends on an account staying in
+good standing is a backend that breaks again later.
+
+Docker is required. It is not enabled by default on a fresh Hetzner image, and
+if you disabled it during cleanup you must enable it again or search stops
+working after the next reboot.
+
+```bash
+systemctl enable --now docker
+```
+
+Write the settings. Two lines matter and neither is the default: `json` in
+`search.formats`, without which the instance answers with an HTML page, and
+`limiter: false`, because the limiter blocks anything that does not look like a
+browser and our client is not one.
+
+```bash
+mkdir -p /etc/searxng
+openssl rand -hex 24 > /etc/searxng/inkpipe-token
+chmod 600 /etc/searxng/inkpipe-token
+```
+
+Then `/etc/searxng/settings.yml`:
+
+```yaml
+use_default_settings: true
+general:
+  instance_name: "inkpipe search"
+  enable_metrics: false
+server:
+  secret_key: "GENERATE WITH openssl rand -hex 32"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+search:
+  formats:
+    - html
+    - json
+  safe_search: 0
+outgoing:
+  request_timeout: 6.0
+```
+
+Run it, bound to loopback so nothing reaches it except through nginx:
+
+```bash
+docker run -d --name searxng --restart unless-stopped \
+  -p 127.0.0.1:8888:8080 \
+  -v /etc/searxng:/etc/searxng \
+  -e SEARXNG_BASE_URL=https://YOUR_HOST/searx/ \
+  --memory 512m \
+  docker.io/searxng/searxng:latest
+```
+
+Add a location to the existing vhost, **above** the catch-all `location /`.
+The token check is not optional. Without it this is an open search proxy for
+anyone who finds the hostname, and it will be found.
+
+```nginx
+location /searx/ {
+    if ($http_x_inkpipe_token != "THE TOKEN FROM /etc/searxng/inkpipe-token") { return 403; }
+    proxy_pass http://127.0.0.1:8888/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 20s;
+}
+```
+
+Never write the nginx backup inside `sites-enabled`. Everything in that
+directory is loaded, so a copy of the vhost is a duplicate server block and
+nginx refuses to start. Keep backups in `/root/nginx-backups`.
+
+Verify from your desktop, not from the server, since the point is the token:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' "https://YOUR_HOST/searx/search?q=test&format=json"
+```
+
+That must print `403`. With `-H "x-inkpipe-token: THE_TOKEN"` it must print
+`200`. Put the token in `secrets.json` on the desktop as `searxngToken`, and the
+URL in `config.json` as `research.host`.

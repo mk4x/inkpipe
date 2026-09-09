@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadSecrets, saveSecrets, setSearchApiKey, hasSearchApiKey } from '../service/src/secrets.ts';
+import { loadSecrets, saveSecrets, setSearchApiKey, setSearxngToken, hasSearchApiKey } from '../service/src/secrets.ts';
 import { fileResearchStore, researchBlocker, buildResearch } from '../service/src/research.ts';
 import { Config } from '../service/src/config.ts';
 import type { SearchProvider, SearchResult } from '../../agent/src/search.ts';
@@ -28,8 +28,15 @@ function configWith(research: Record<string, unknown> = {}) {
     serverUrl: 'https://inkpipe.example.com',
     deviceId: '00000000-0000-4000-8000-000000000000',
     vault: { root: 'C:/vault', notesPath: 'Notes' },
-    research: { enabled: true, cx: 'CX', ...research },
+    // Explicit, because the shipped default is searxng. These tests predate
+    // that and are about the google path.
+    research: { enabled: true, provider: 'google', cx: 'CX', ...research },
   });
+}
+
+/** The shipped default: a self-hosted instance behind a token. */
+function searxngConfig(research: Record<string, unknown> = {}) {
+  return configWith({ provider: 'searxng', host: 'https://inkpipe.example.com/searx/', ...research });
 }
 
 const RESULT: SearchResult = {
@@ -204,6 +211,86 @@ describe('researchBlocker', () => {
 
       setSearchApiKey('k', secrets);
       assert.equal(researchBlocker(configWith(), secrets), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the searxng provider, which is the shipped default', () => {
+  test('a remote instance without a token is refused, not quietly published', () => {
+    // An instance on a public hostname with no token is an open search proxy
+    // for anyone who finds it, and it would be abused within days.
+    const dir = scratch();
+    try {
+      const blocker = researchBlocker(searxngConfig(), join(dir, 'none.json'));
+      assert.match(blocker ?? '', /token/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a loopback instance needs no token', () => {
+    const dir = scratch();
+    try {
+      const config = searxngConfig({ host: 'http://127.0.0.1:8888' });
+      assert.equal(researchBlocker(config, join(dir, 'none.json')), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a token plus a remote instance is complete', () => {
+    const dir = scratch();
+    const secrets = join(dir, 'secrets.json');
+    try {
+      setSearxngToken('t0ken', secrets);
+      assert.equal(researchBlocker(searxngConfig(), secrets), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a missing host says so', () => {
+    assert.match(researchBlocker(searxngConfig({ host: '' })) ?? '', /instance URL/);
+  });
+
+  test('the course qualifies the query, so bare terms are searchable', async () => {
+    // Measured on corpus page F: without this, "Epsilon" searched alone
+    // returns the Greek letter and brand names, and four of six terms found no
+    // relevant source, downgrading correct explanations for nothing.
+    const dir = scratch();
+    const secrets = join(dir, 'secrets.json');
+    try {
+      setSearxngToken('t0ken', secrets);
+      const { provider, calls } = countingProvider();
+      const built = buildResearch(searxngConfig(), {
+        secretsPath: secrets, researchPath: join(dir, 'research.json'), provider,
+      });
+
+      await built!.lookup('Epsilon', 'Formal Languages');
+
+      assert.deepEqual(calls, ['Epsilon Formal Languages']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('the same term in two courses is looked up separately', async () => {
+    // Otherwise the cache would serve linear algebra results for a heap.
+    const dir = scratch();
+    const secrets = join(dir, 'secrets.json');
+    try {
+      setSearxngToken('t0ken', secrets);
+      const { provider, calls } = countingProvider();
+      const built = buildResearch(searxngConfig(), {
+        secretsPath: secrets, researchPath: join(dir, 'research.json'), provider,
+      });
+
+      await built!.lookup('rank', 'Algorithms');
+      await built!.lookup('rank', 'Linear Algebra');
+
+      assert.equal(calls.length, 2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

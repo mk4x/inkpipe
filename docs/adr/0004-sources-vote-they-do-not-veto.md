@@ -1,7 +1,7 @@
 # ADR 0004: sources vote, they do not veto
 
 **Date:** 2026-09-09
-**Status:** Accepted, unmeasured
+**Status:** Accepted. Measured on two pages, see the amendment below
 **Relates to:** ADR 0003, decision 31, CLAUDE.md rule 4
 
 ## Context
@@ -55,7 +55,7 @@ regresses terms that were already right.
 | page | sources | outcome | text kept |
 |---|---|---|---|
 | consistent | supported | high | yes |
-| consistent | unverified | low, "unverified" | yes |
+| consistent | unverified | unchanged, as if research were off (see amendment) | yes |
 | consistent | refuted | **unsupported**, flagged | yes |
 | consistent | mixed | **unsupported**, "sources disagree" | yes |
 | contradicts | supported | **disputed**, both shown | yes |
@@ -111,7 +111,69 @@ guess.
   machine is idle, and the owner has said repeatedly that time is not the
   constraint.
 
-## Status is Accepted, unmeasured
+## Amendment, same day: the provider is SearXNG, and the numbers exist
+
+Two things changed after this was written, both from running it.
+
+### Google's JSON API was abandoned
+
+Four API keys across two Cloud projects were refused with
+`This project does not have the access to Custom Search JSON API`, while the
+console showed the API enabled and the project's own metrics showed our
+requests arriving and erroring. That is not a configuration this project can
+fix, and a search backend that depends on an account staying in good standing
+is a backend that breaks again later.
+
+The replacement is **SearXNG, self-hosted**. It queries Google underneath, so
+the index is the same, and it needs no API key, no account, no quota and no
+billing. It also deletes a whole class of problem: there is no credential to
+leak, rotate, or accidentally commit, which matters because a key was leaked to
+a public commit during this work.
+
+It runs in Docker on the owner's existing VPS, bound to loopback, behind an
+nginx location that requires a token header. Without that token it would be an
+open search proxy for anyone who found the hostname.
+
+Google remains supported. It is no longer the default.
+
+### `unverified` was a veto in disguise
+
+The first real comparison downgraded four of six terms on page F from `high` to
+`low`, and every one of those four explanations was correct. The cause was this
+document's own matrix: "page consistent, sources unverified" produced `low`.
+
+That is wrong, and it contradicts the rule this ADR is named after. Google
+having no page that defines the bare word "Language" is not evidence against an
+explanation of it. Downgrading on silence is a veto with extra steps.
+
+**An unverified term now behaves exactly as if research were switched off.**
+Absence of evidence is not evidence. Sources may still label a term
+`unsupported` when they actively argue against it, which is a real signal, and
+that path is unchanged.
+
+Two smaller fixes came from the same run. The course was not being passed into
+the query, so "Epsilon" was searched as a bare word and returned the Greek
+letter and several brand names. And extraction was picking instructions off the
+page ("Remove redundancy") and copying the page's misspellings into queries
+("Kleeny star"), both now handled in `expand.ts`.
+
+### The numbers
+
+Twelve terms, two pages, three samples each, hand graded.
+
+| | page E | page F |
+|---|---|---|
+| terms | 6 | 6 |
+| verdict changed | 1 | 1 |
+| **regressions** | **0** | **0** |
+| improvements | 1 (low to high) | 1 (refused to explained) |
+| corroborated by sources | 5 of 6 | 3 of 6 |
+
+Zero regressions is the number this ADR said would decide the question. Two
+pages and twelve terms is a small sample and the corpus should grow before this
+is treated as settled, but nothing here argues for keeping it off.
+
+## Why the status originally said unmeasured
 
 This is the first decision in the project taken **without** a spike behind it,
 and that is a real difference from ADR 0001 and ADR 0003.
@@ -121,8 +183,8 @@ of nine correct by hand, with both invented controls refused. There is no
 headroom to demonstrate a gain.
 
 The number that decides whether this ships enabled is **regressions**: terms
-that were correct without search and wrong with it. Until a side by side run
-exists, `research.enabled` defaults to false.
+that were correct without search and wrong with it. That run has now happened
+and is recorded in the amendment above: zero regressions across twelve terms.
 
 ## What would change this
 

@@ -26,7 +26,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expandTerms, extractTerms } from '../../apps/agent/src/expand.ts';
-import { lookup, googleProvider, memoryCache, dailyBudget } from '../../apps/agent/src/search.ts';
+import { lookup, providerFromConfig, memoryCache, dailyBudget } from '../../apps/agent/src/search.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RESULTS = join(HERE, 'results');
@@ -46,7 +46,7 @@ const raw = readFileSync(join(HERE, 'expected', `${PAGE}.md`), 'utf8');
 const notes = raw.replace(/^---[\s\S]*?---\n/, '').trim();
 
 const course = /compiler/i.test(PAGE) ? 'Compiler Construction'
-  : /formal/i.test(PAGE) ? 'Compiler Construction'
+  : /formal/i.test(PAGE) ? 'Formal Languages'
     : 'Algorithms and Data Structures';
 
 // --- the model -------------------------------------------------------------
@@ -68,6 +68,8 @@ async function model(prompt, options = {}) {
 
 // --- research, when credentials exist ---------------------------------------
 
+/** Build whatever provider the real config points at, so this harness cannot
+ *  drift from what the app actually does. */
 function credentials() {
   const base = process.env.APPDATA
     ? join(process.env.APPDATA, 'inkpipe')
@@ -75,15 +77,19 @@ function credentials() {
   try {
     const config = JSON.parse(readFileSync(join(base, 'config.json'), 'utf8'));
     const secrets = JSON.parse(readFileSync(join(base, 'secrets.json'), 'utf8'));
-    if (!secrets.searchApiKey || !config.research?.cx) return null;
-    return { apiKey: secrets.searchApiKey, cx: config.research.cx };
+    return providerFromConfig({
+      provider: config.research?.provider ?? 'searxng',
+      apiKey: secrets.searchApiKey,
+      cx: config.research?.cx,
+      host: config.research?.host,
+      token: secrets.searxngToken,
+    });
   } catch {
     return null;
   }
 }
 
-function researchFrom(creds, budgetLimit) {
-  const provider = googleProvider({ apiKey: creds.apiKey, cx: creds.cx });
+function researchFrom(provider, budgetLimit) {
   const cache = memoryCache();
   const budget = dailyBudget(budgetLimit);
   const queried = [];
@@ -91,9 +97,9 @@ function researchFrom(creds, budgetLimit) {
   return {
     queried,
     research: {
-      async lookup(term) {
+      async lookup(term, course) {
         queried.push(term);
-        const result = await lookup(term, { provider, cache, budget, limit: 5 });
+        const result = await lookup(term, { provider, cache, budget, course, limit: 5 });
         return { results: result.results, reason: result.reason };
       },
     },
@@ -131,15 +137,15 @@ if (BASELINE_ONLY) {
   process.exit(0);
 }
 
-const creds = credentials();
-if (!creds) {
-  console.log('No search credentials found. Run with --baseline, or finish the Google setup.');
+const provider = credentials();
+if (!provider) {
+  console.log('No usable search provider in the config. Run with --baseline, or finish setup.');
   process.exit(1);
 }
 
 // One query per term, plus headroom. Deliberately small: this is a measurement,
 // not a reason to spend the day's quota.
-const { research, queried } = researchFrom(creds, terms.length + 2);
+const { research, queried } = researchFrom(provider, terms.length + 2);
 
 const secondStart = Date.now();
 console.log('running WITH research...');

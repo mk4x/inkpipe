@@ -79,8 +79,14 @@ export interface Expansion {
 export interface ResearchOptions {
   /** Injected, so expansion knows nothing about providers, caches or budgets.
    *  A reason means the search could not run, which is not the same as running
-   *  and finding nothing, and the two are never conflated. */
-  lookup: (term: string) => Promise<{ results: SearchResult[]; reason: string | null }>;
+   *  and finding nothing, and the two are never conflated.
+   *
+   *  The course is passed because a bare term is often unsearchable. Measured
+   *  on corpus page F: searching "Epsilon" alone returns the Greek letter and
+   *  a dozen brand names, and four of six terms came back with no relevant
+   *  source at all, downgrading correct explanations for no reason. The course
+   *  comes from config, never from model output. */
+  lookup: (term: string, course?: string) => Promise<{ results: SearchResult[]; reason: string | null }>;
 }
 
 export interface ExpandOptions {
@@ -327,7 +333,7 @@ async function explainFromSources(term: string, options: ExpandOptions): Promise
     return refused(term, 'the model said it does not know this term');
   }
 
-  const { results, reason } = await options.research.lookup(term);
+  const { results, reason } = await options.research.lookup(term, options.course);
   if (reason) {
     return refused(term, `the model does not know this term, and it could not be looked up: ${reason}`);
   }
@@ -442,13 +448,22 @@ function combine(
       agreement, sources,
     };
   }
+  // Nothing relevant came back. That is NOT a reason to doubt the explanation,
+  // and treating it as one made research a net negative.
+  //
+  // Measured on corpus page F: four of six terms were downgraded from high to
+  // low purely because no snippet discussed them, and every one of those four
+  // was a correct explanation. The terms were generic words like "Language",
+  // which no page defines in isolation. Meanwhile "Kleene star", an actual
+  // named concept, found three sources and held its confidence.
+  //
+  // So an unverified term behaves exactly as if research were switched off.
+  // Absence of evidence is not evidence, and ADR 0004 says sources vote rather
+  // than veto: silently downgrading on silence was a veto in disguise.
   if (evidence.verdict === 'unverified') {
     return {
-      term, text, confidence: 'low',
-      reason: evidence.unavailable
-        ? `not checked against sources: ${evidence.unavailable}`
-        : 'no source was found that discusses this, so it is unverified',
-      agreement, sources,
+      term, text, confidence: softReason ? 'low' : 'high',
+      reason: softReason, agreement, sources,
     };
   }
 
@@ -522,7 +537,7 @@ export async function expandTerm(term: string, options: ExpandOptions): Promise<
   // wrongly is precisely the case that needs a second opinion.
   let evidence: Evidence | null = null;
   if (options.research) {
-    const { results, reason } = await options.research.lookup(term);
+    const { results, reason } = await options.research.lookup(term, options.course);
     evidence = await readEvidence(candidate, results, {
       model: options.model,
       unavailable: reason,

@@ -114,11 +114,20 @@ export const Config = z.object({
    *  file someone pastes into an issue when asking for help. */
   research: z.object({
     enabled: z.boolean().default(false),
-    provider: z.enum(['google']).default('google'),
-    /** Programmable Search Engine id. Not a secret, unlike the key. */
+    /** `searxng` is a metasearch instance you host yourself. It queries Google
+     *  underneath, so the index is the same, and it needs no API key, no
+     *  account, no quota and no billing. ADR 0004 records why it is the
+     *  default: Google's JSON API refused four keys across two projects with
+     *  the API provably enabled and receiving the requests. */
+    provider: z.enum(['google', 'searxng']).default('searxng'),
+    /** Programmable Search Engine id, for the google provider. Not a secret. */
     cx: z.string().default(''),
-    /** Google's free tier is 100 a day. Refuses to search past this rather
-     *  than degrading silently to unsourced expansion. */
+    /** Base URL of a SearXNG instance. Must be https unless it is loopback,
+     *  since the access token travels in a header. */
+    host: z.string().default(''),
+    /** Google's free tier is 100 a day, so the cap protects a real limit
+     *  there. A self-hosted instance has no quota, and this still bounds a
+     *  runaway loop, so it is kept for both. */
     maxQueriesPerDay: z.number().int().min(0).max(10_000).default(100),
     /** Snippets read per term. Each one is a small model call. */
     snippetsPerTerm: z.number().int().min(1).max(10).default(5),

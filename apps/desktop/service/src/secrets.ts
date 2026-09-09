@@ -25,11 +25,14 @@ const StoredSecrets = z.object({
   /** Google Programmable Search API key. The engine id (cx) is not secret and
    *  lives in the config next to the rest of the research settings. */
   searchApiKey: z.string().default(''),
+  /** Shared secret for a self-hosted SearXNG instance (ADR 0004). Without it
+   *  an instance on a public hostname is an open search proxy. */
+  searxngToken: z.string().default(''),
 });
 
 export type Secrets = z.infer<typeof StoredSecrets>;
 
-const EMPTY: Secrets = { version: 1, searchApiKey: '' };
+const EMPTY: Secrets = { version: 1, searchApiKey: '', searxngToken: '' };
 
 export function defaultSecretsPath(): string {
   return join(dirname(defaultConfigPath()), 'secrets.json');
@@ -68,6 +71,20 @@ export function setSearchApiKey(key: string, path = defaultSecretsPath()): void 
   saveSecrets({ ...loadSecrets(path), searchApiKey: key.trim() }, path);
 }
 
+export function setSearxngToken(token: string, path = defaultSecretsPath()): void {
+  saveSecrets({ ...loadSecrets(path), searxngToken: token.trim() }, path);
+}
+
 export function hasSearchApiKey(path = defaultSecretsPath()): boolean {
   return loadSecrets(path).searchApiKey.length > 0;
+}
+
+/** Whichever credential the configured provider needs. */
+export function hasCredentialFor(provider: 'google' | 'searxng', path = defaultSecretsPath()): boolean {
+  const secrets = loadSecrets(path);
+  // A SearXNG instance on loopback needs no token, so this is not required in
+  // the way the Google key is. researchBlocker decides; this only reports.
+  return provider === 'google'
+    ? secrets.searchApiKey.length > 0
+    : secrets.searxngToken.length > 0;
 }

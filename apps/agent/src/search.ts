@@ -157,10 +157,93 @@ export function googleProvider(options: GoogleOptions): SearchProvider {
   };
 }
 
+// ---------------------------------------------------------------------------
+// SearXNG
+//
+// A metasearch front end you host yourself. It queries Google underneath, so
+// the index is the same, and it needs no API key, no Google account, no quota
+// and no billing.
+//
+// Chosen after Google's JSON API refused four keys across two projects with the
+// API provably enabled and receiving the requests. That is not a configuration
+// this project can fix, and a search backend that depends on an account staying
+// in good standing is a backend that breaks again later.
+//
+// It also removes a whole class of problem. There is no key here, so there is
+// nothing to leak, rotate, or accidentally commit.
+// ---------------------------------------------------------------------------
+
+export interface SearxngOptions {
+  /** Base URL of the instance. The user's own, so it is configured, never
+   *  defaulted: there is no public instance baked in. */
+  host: string;
+  /** Sent as a header when the instance is behind a token check. A private
+   *  instance on a public hostname needs one, or it becomes an open search
+   *  proxy for anyone who finds it. */
+  token?: string;
+  fetch?: Fetcher;
+}
+
+export function searxngProvider(options: SearxngOptions): SearchProvider {
+  const doFetch = options.fetch ?? fetch;
+  return {
+    name: 'searxng',
+    async search(query, limit) {
+      const url = new URL('search', options.host.endsWith('/') ? options.host : `${options.host}/`);
+      url.searchParams.set('q', query);
+      url.searchParams.set('format', 'json');
+
+      const headers: Record<string, string> = { accept: 'application/json' };
+      if (options.token) headers['x-inkpipe-token'] = options.token;
+
+      let response: Response;
+      try {
+        response = await doFetch(url, { headers });
+      } catch (error) {
+        throw new SearchError('unreachable', `could not reach searxng: ${(error as Error).message}`);
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        throw new SearchError('forbidden', 'the searxng instance rejected the token');
+      }
+      if (response.status === 429) {
+        throw new SearchError('rate_limited', 'the searxng instance is rate limiting this client');
+      }
+      if (!response.ok) {
+        throw new SearchError('provider_error', `searxng returned ${response.status}`);
+      }
+
+      let body: { results?: Array<Record<string, unknown>> };
+      try {
+        body = await response.json() as { results?: Array<Record<string, unknown>> };
+      } catch {
+        // The usual cause is JSON output not being enabled in settings.yml, so
+        // the instance answered with an HTML search page. Say that, rather than
+        // reporting a parse error nobody can act on.
+        throw new SearchError(
+          'provider_error',
+          'searxng did not return JSON. Add "json" to search.formats in settings.yml.',
+        );
+      }
+
+      return (body.results ?? [])
+        .slice(0, limit)
+        .map((item) => ({
+          title: String(item.title ?? ''),
+          url: String(item.url ?? ''),
+          snippet: String(item.content ?? ''),
+        }))
+        .filter((r) => r.url.length > 0 && r.snippet.length > 0);
+    },
+  };
+}
+
 export interface ProviderConfig {
-  provider: 'google';
+  provider: 'google' | 'searxng';
   apiKey?: string;
   cx?: string;
+  host?: string;
+  token?: string;
 }
 
 /**
@@ -170,16 +253,39 @@ export interface ProviderConfig {
  * doing nothing, which looks identical to the feature being broken.
  */
 export function providerFromConfig(config: ProviderConfig, fetcher?: Fetcher): SearchProvider {
-  if (config.provider !== 'google') {
-    throw new SearchError('unknown_provider', `unknown search provider: ${String(config.provider)}`);
+  if (config.provider === 'google') {
+    if (!config.apiKey || !config.cx) {
+      throw new SearchError(
+        'not_configured',
+        'the google provider needs both an API key and a search engine id (cx). Run setup.',
+      );
+    }
+    return googleProvider({ apiKey: config.apiKey, cx: config.cx, fetch: fetcher });
   }
-  if (!config.apiKey || !config.cx) {
-    throw new SearchError(
-      'not_configured',
-      'the google provider needs both an API key and a search engine id (cx). Run setup.',
-    );
+
+  if (config.provider === 'searxng') {
+    if (!config.host) {
+      throw new SearchError('not_configured', 'the searxng provider needs an instance URL. Run setup.');
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(config.host);
+    } catch {
+      throw new SearchError('not_configured', `searxng host is not a valid URL: ${config.host}`);
+    }
+    // A token travels in a header, so plain HTTP would put it on the wire in
+    // clear. Loopback is exempt because there is no wire.
+    const local = parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost';
+    if (parsed.protocol !== 'https:' && !local) {
+      throw new SearchError(
+        'not_configured',
+        'a remote searxng instance must be https, otherwise the token travels in clear',
+      );
+    }
+    return searxngProvider({ host: config.host, token: config.token, fetch: fetcher });
   }
-  return googleProvider({ apiKey: config.apiKey, cx: config.cx, fetch: fetcher });
+
+  throw new SearchError('unknown_provider', `unknown search provider: ${String(config.provider)}`);
 }
 
 // ---------------------------------------------------------------------------

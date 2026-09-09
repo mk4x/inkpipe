@@ -1,0 +1,145 @@
+{
+  "page": "page-f-formal-languages",
+  "model": "qwen2.5:14b",
+  "terms": [
+    "Micro syntax",
+    "Kleene star",
+    "MVP",
+    "epsilon",
+    "alphabet",
+    "ASCII"
+  ],
+  "before": [
+    {
+      "term": "Micro syntax",
+      "text": "Micro syntax refers to the smallest syntactic components of a programming language, such as keywords (if, for, pass) and basic data types (e.g., numbers), which form the building blocks for constructing valid statements and expressions in the language.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "Kleene star",
+      "text": "The Kleene star of a set $\\Sigma$, denoted $\\Sigma^*$, is the set of all possible strings (including the empty string) that can be formed from the elements of $\\Sigma$, including the possibility of repeating elements any number of times.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "MVP",
+      "text": "MVP stands for Minimum Viable Product, which in the context of compiler construction refers to creating a basic version of the compiler that functions with essential features, to be optimized later.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "epsilon",
+      "text": "$\\epsilon$, or \"epsilon\", represents the empty string, which is a string with zero characters. In the context of formal languages, $\\epsilon$ is an element of $\\Sigma^*$, the Kleene closure of the alphabet $\\Sigma$.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "alphabet",
+      "text": "The alphabet $\\Sigma$ is defined as the set of all positive characters, which in this context refers to the set of symbols or characters used to form words or strings in a formal language, such as the ASCII character set.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "ASCII",
+      "text": "",
+      "confidence": "refused",
+      "reason": "the model said it does not know this term",
+      "agreement": null,
+      "sources": []
+    }
+  ],
+  "after": [
+    {
+      "term": "Micro syntax",
+      "text": "Micro syntax refers to the smallest units of syntax in a programming language, such as keywords (if, for, pass) and data types (numbers), which are used to construct the structure and semantics of the language.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "Kleene star",
+      "text": "The Kleene star of an alphabet $\\Sigma$, denoted $\\Sigma^*$, is the set of all possible strings including the empty string that can be formed from the elements of $\\Sigma$, including strings of all possible lengths from 0 to infinity.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": [
+        {
+          "title": "Kleene star - Wikipedia",
+          "url": "https://en.wikipedia.org/wiki/Kleene_star",
+          "snippet": "In formal language theory, the Kleene star (or Kleene operator or Kleene closure) refers to two related unary operations, that can be applied either to an alphabet of symbols or to a formal language, a set of strings (finite sequences of symbols)."
+        },
+        {
+          "title": "Kleene star | Encyclopedia.com",
+          "url": "https://www.encyclopedia.com/computing/dictionaries-thesauruses-pictures-and-press-releases/kleene-star",
+          "snippet": "Kleene star (star closure; Kleene closure; iteration) An operation on formal languages that gives for any language L the language L*, defined by {Λ} ∪ L ∪ LL ∪ LLL ∪ … where Λ is the empty word. Thus a word w is in L* if and only if it has the form w1w2…wn with each wi in L, i.e."
+        }
+      ]
+    },
+    {
+      "term": "MVP",
+      "text": "MVP refers to the Minimum Viable Product, which in the context of the notes provided means creating a basic version of a compiler that performs essential functions without extensive optimization, with the intention of adding optimizations later.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "epsilon",
+      "text": "Epsilon, denoted as $\\epsilon$, represents the empty string, which is a string containing zero characters. It is an element of $\\Sigma^*$, the Kleene closure of the alphabet $\\Sigma$.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "alphabet",
+      "text": "The alphabet $\\Sigma$ is a set of all positive characters, which can be considered as the set of all possible symbols or characters used to form words or strings in a formal language, such as ASCII characters.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": [
+        {
+          "title": "Alphabet (formal languages) - Wikipedia",
+          "url": "https://en.wikipedia.org/wiki/Alphabet_(formal_languages)",
+          "snippet": "In formal language theory, an alphabet, often called a vocabulary in the context of terminal and nonterminal symbols, is a non-empty set of indivisible symbols/characters/glyphs, typically thought of as representing letters, characters, digits, phonemes, or even words."
+        }
+      ]
+    },
+    {
+      "term": "ASCII",
+      "text": "ASCII stands for American Standard Code for Information Interchange. It is a character encoding standard that uses numbers to represent textual data, with each number corresponding to a specific character.",
+      "confidence": "low",
+      "reason": "the model only sometimes claimed to know this",
+      "agreement": 1,
+      "sources": [
+        {
+          "title": "ASCII - Wikipedia",
+          "url": "https://en.wikipedia.org/wiki/ASCII",
+          "snippet": "ASCII (/ˈæski/ ⓘ ASS-kee), an acronym for American Standard Code for Information Interchange, is a character encoding standard for representing a particular set of 95 (English-language–focused) printable and 33 control characters – a total of 128 code points."
+        },
+        {
+          "title": "Formal language - Wikipedia",
+          "url": "https://en.wikipedia.org/wiki/Formal_language",
+          "snippet": "An alphabet may contain an infinite ... in formal language theory specify alphabets with a finite number of elements, and many results apply only to them. It often makes sense to use an alphabet in the usual sense of the word, or more generally any finite character encoding such as ASCII or ..."
+        },
+        {
+          "title": "Se ction 8.1Th e Study of La ngu a g es 321 Formal languages",
+          "url": "https://www.cs.umd.edu/class/spring2022/cmsc330/resources/Chap08Languages.pdf",
+          "snippet": "lish” or “*^%#HDF3DFF#”. The goal of a syntax for C is to sort all the possible ASCII · gs into valid and invalid C programs. From this point of view the language C is simply · set of strings that meet our rules. ur game if we say “Yes,” a string is valid C, then we are saying the string is in this set. e say “No,” then we are saying the string is not in this set. This is all we mean by the · m formal language; a formal language is a set of strings that meet a well-deﬁned set of ·"
+        }
+      ]
+    }
+  ]
+}

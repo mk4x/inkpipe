@@ -140,7 +140,8 @@ account was created instead.
 
   "research": {
     "enabled": false,
-    "provider": "google",
+    "provider": "searxng",
+    "host": "https://your-server.example.com/searx/",
     "cx": "",
     "maxQueriesPerDay": 100,
     "snippetsPerTerm": 5,
@@ -268,16 +269,25 @@ material, so a content farm must not be able to outrank a correct answer.
 page contradicts, which usually means the page is wrong. That is a note worth
 re-reading, and it is the case the gate could not detect before.
 
-To set it up you need a Google Programmable Search Engine, configured to search
-the entire web, plus its engine id and an API key. The engine id goes in `cx`
-here. **The API key does not go in this file**, because this file holds vault
-paths and course names and is the one people paste into an issue when asking for
-help.
+**The default provider is `searxng`**, a metasearch instance you host yourself.
+It queries Google underneath, so the index is the same, and it needs no API key,
+no account, no quota and no billing. `docs/VPS_SETUP.md` has the deployment.
+Put its URL in `host`.
 
-The key lives in `secrets.json` beside the config, mode 0600, written through
-`POST /api/research/key`. That endpoint is write only: the status endpoint
-reports whether a key is set and how many queries are left today, and never
-returns the key itself.
+Google Programmable Search is still supported. Set `provider` to `google` and
+put the engine id in `cx`. Be aware that during development four keys across two
+Cloud projects were refused with a project-level error while the console showed
+the API enabled, so if it does not work for you, it may not be anything you did.
+[adr/0004](adr/0004-sources-vote-they-do-not-veto.md) has the detail.
+
+**No credential goes in this file**, because it holds vault paths and course
+names and is the one people paste into an issue when asking for help.
+
+Credentials live in `secrets.json` beside the config, mode 0600. `searxngToken`
+for a self-hosted instance, `searchApiKey` for Google. A SearXNG instance on a
+public hostname **requires** the token, and setup refuses to run without one:
+otherwise it is an open search proxy for anyone who finds the URL. A loopback
+instance needs no token, since there is no wire to protect.
 
 Three files sit beside each other in the config directory:
 

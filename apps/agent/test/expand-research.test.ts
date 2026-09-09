@@ -132,26 +132,41 @@ describe('the page agrees or is silent', () => {
     assert.equal(result.sources.length, 2, 'both sides are cited');
   });
 
-  test('no relevant source leaves it unverified rather than wrong', async () => {
+  test('no relevant source changes nothing, because absence of evidence is not evidence', async () => {
+    // Measured on corpus page F: downgrading on silence took four correct
+    // explanations from high to low, purely because no page defines a generic
+    // word like "Language" on its own. That made research a net negative and
+    // was a veto in all but name, which ADR 0004 forbids.
     const { model } = harness({ snippets: { 'baking.example.org': 'IRRELEVANT' } });
     const { research } = lookupOf([offTopic]);
 
     const result = await expandTerm('rank', { ...base, model, research });
 
-    assert.equal(result.confidence, 'low');
-    assert.match(result.reason ?? '', /unverified/);
+    assert.equal(result.confidence, 'high');
+    assert.equal(result.reason, null);
+    assert.ok(result.text.length > 0);
   });
 
-  test('a search that could not run says so, and does not read as no evidence', async () => {
+  test('an unverified term is identical to research being switched off', async () => {
+    const withResearch = await expandTerm('rank', {
+      ...base,
+      model: harness({ snippets: { 'baking.example.org': 'IRRELEVANT' } }).model,
+      research: lookupOf([offTopic]).research,
+    });
+    const without = await expandTerm('rank', { ...base, model: harness({}).model });
+
+    assert.equal(withResearch.confidence, without.confidence);
+    assert.equal(withResearch.reason, without.reason);
+  });
+
+  test('a search that could not run also changes nothing', async () => {
     const { model, calls } = harness({});
     const { research } = lookupOf([], 'the daily search budget is spent');
 
     const result = await expandTerm('rank', { ...base, model, research });
 
     assert.equal(calls.snippet, 0, 'nothing to classify when nothing was searched');
-    assert.equal(result.confidence, 'low');
-    assert.match(result.reason ?? '', /not checked against sources/);
-    assert.match(result.reason ?? '', /budget/);
+    assert.equal(result.confidence, 'high', 'being offline must not cast doubt on an explanation');
   });
 });
 
