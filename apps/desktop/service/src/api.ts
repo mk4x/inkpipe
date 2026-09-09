@@ -229,6 +229,7 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
         contentPrivateKey: keys.content.privateKey,
         course: config.defaultCourse,
         glossary: glossaryFor(config, config.defaultCourse),
+        formatting: config.formatting,
         model,
       });
       return reply.send({ drafts: drafts.length });

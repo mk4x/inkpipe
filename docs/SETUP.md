@@ -89,6 +89,14 @@ same issue.
     "timeoutMs": 180000
   },
 
+  "formatting": {
+    "math": true,
+    "tables": true,
+    "lists": true,
+    "headings": true,
+    "whitespace": true
+  },
+
   "pollSeconds": 60,
   "verbosity": "cleaned",
   "cloudEscalationEnabled": false
@@ -107,6 +115,32 @@ in the preview editor, so it gets better with use.
 same prepared page costing `qwen2.5vl:7b` about 1600 image tokens and
 `granite3.2-vision:2b` 7529. If you change the model, check this: a page that
 overflows the context fails with an HTTP 400 rather than degrading gracefully.
+
+**`formatting`** controls how the raw transcript is tidied before you see it.
+The model returns serviceable but scruffy Markdown: mixed bullet characters,
+tables missing their alignment row, Unicode maths that renders inconsistently,
+and stray H1s that fight the note title.
+
+| pass | what it does |
+|---|---|
+| `math` | wraps high-confidence expressions in `$...$` and converts Unicode operators to LaTeX, so `O(log n)`, `2^r - 1`, `n2` and `h1 + h2` render properly |
+| `tables` | adds the alignment row Obsidian needs, without which a table shows as raw pipes, and pads ragged rows |
+| `lists` | one bullet character, indentation in clean two-space levels |
+| `headings` | demotes stray H1s so the note has exactly one |
+| `whitespace` | collapses blank line runs, strips trailing spaces, ensures a final newline |
+
+The governing rule is **normalise, never invent**. Every pass is conservative
+and reversible in meaning, because a formatter that guesses at mathematics and
+gets it wrong is worse than one that leaves the text alone: a mangled formula in
+a study note reads as authoritative. Unicode arrows in prose are left alone,
+ordinary sentences are never wrapped in maths delimiters, and **nothing inside a
+code fence is ever touched**.
+
+The formatter runs before the safety pass, never after, so sanitisation always
+has the final word on what reaches your vault.
+
+If a pass gets in your way, switch it off. A tidy note passed through the
+formatter comes out byte-identical, which is asserted by a test.
 
 **`verbosity`** has three values, not a slider, because three have testable
 meanings and a slider does not.

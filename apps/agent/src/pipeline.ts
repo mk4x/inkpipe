@@ -11,6 +11,7 @@ import type { InkpipeClient } from '@inkpipe/client';
 import type { BlobMeta, PendingBlobsResponse } from '@inkpipe/protocol';
 import { transcribePage, type TranscribeOptions, type PromptVariant } from './transcribe.ts';
 import { inertMarkdown, sanitizeSegment } from './sanitize.ts';
+import { formatMarkdown, type FormatOptions } from './format.ts';
 
 export interface PageDraft {
   blobId: string;
@@ -26,6 +27,9 @@ export interface PageDraft {
   imageFilename: string;
   /** What the sanitiser changed, so the preview can show it. */
   sanitiserChanges: string[];
+  /** What the formatter tidied. Shown separately because these are cosmetic,
+   *  whereas a sanitiser change means something was potentially unsafe. */
+  formatterChanges: string[];
 }
 
 export interface Draft {
@@ -41,6 +45,8 @@ export interface CollectOptions extends TranscribeOptions {
   client: InkpipeClient;
   contentPrivateKey: Uint8Array;
   course: string;
+  /** Which tidy-up passes to run. Omit for the defaults. */
+  formatting?: Partial<FormatOptions>;
   /** Degrees clockwise. The real app derives this from the phone's orientation
    *  metadata; the slice takes it as a parameter. */
   rotate?: number;
@@ -95,7 +101,12 @@ export async function collectDrafts(options: CollectOptions): Promise<Draft[]> {
       const vaultImage = await prepForVault(original, { rotate: options.rotate });
 
       const result = await transcribePage(forModel, options);
-      const inerted = inertMarkdown(result.markdown);
+
+      // Format first, sanitise last. Security gets the final word: whatever the
+      // formatter produces still has to pass the inerting pass before it can
+      // reach the vault.
+      const formatted = formatMarkdown(result.markdown, options.formatting);
+      const inerted = inertMarkdown(formatted.text);
 
       pages.push({
         blobId: meta.blobId,
@@ -111,6 +122,7 @@ export async function collectDrafts(options: CollectOptions): Promise<Draft[]> {
         vaultImage,
         imageFilename: `${sessionId}-p${String(meta.seq).padStart(2, '0')}.webp`,
         sanitiserChanges: inerted.changes,
+        formatterChanges: formatted.changes,
       });
     }
 

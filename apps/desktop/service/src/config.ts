@@ -61,6 +61,23 @@ export const Config = z.object({
     timeoutMs: z.number().int().min(10_000).max(900_000).default(180_000),
   }).default({}),
 
+  // --- formatting ---
+  /** Tidy-up passes applied to the transcript before it reaches the preview.
+   *  All are conservative and reversible in meaning: the formatter normalises,
+   *  it never invents. Each can be switched off if it gets in your way. */
+  formatting: z.object({
+    /** Wrap high-confidence maths in $...$ and convert Unicode operators */
+    math: z.boolean().default(true),
+    /** Add the alignment row Obsidian needs, pad ragged columns */
+    tables: z.boolean().default(true),
+    /** One bullet character, two-space indent levels */
+    lists: z.boolean().default(true),
+    /** Demote stray H1s so they do not compete with the note title */
+    headings: z.boolean().default(true),
+    /** Collapse blank line runs, strip trailing spaces */
+    whitespace: z.boolean().default(true),
+  }).default({}),
+
   // --- behaviour ---
   /** Decision 13: 60 second default, configurable. */
   pollSeconds: z.number().int().min(10).max(3600).default(60),
