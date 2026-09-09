@@ -24,8 +24,18 @@ qwen2.5vl:7b, CER (lower is better) and required-term coverage (higher is better
 | prepped, plain prompt | 2.267 | 0.381 | 0.116 | 0.909 |
 | prepped, course-primed prompt | **0.567** | 0.952 | 0.146 | 0.909 |
 
-minicpm-v:8b, prepped and plain: Page A 3.319 / 0.095, Page B 3.373 / 0.091.
-Both outputs were degenerate loops.
+Other models, prepped and primed:
+
+| Model | Page A CER | Page B CER | Outcome |
+|---|---|---|---|
+| minicpm-v:8b | 3.319 | 3.373 | Degenerate on both. Rejected. |
+| granite3.2-vision:2b | 5.033 | 1.709 | Degenerate on both. Rejected. |
+| llama3.2-vision:11b | - | - | **Will not load on Ollama 0.33.3**: `unknown model architecture: 'mllama'`. Untestable, not a quality judgement. |
+
+Note on granite: its Page A coverage of 0.667 sits alongside a CER of 5.033.
+That combination is only possible by emitting a large volume of glossary-adjacent
+text, and it is the clearest evidence in this spike that **coverage must never be
+read without CER beside it**.
 
 ## Findings
 
@@ -43,6 +53,12 @@ written into a note. It is also trivially detectable.
 resolution page is roughly 4200 image tokens and hard-fails the default 4096
 context. And on the rotated, shadowed Page A, prep moved CER from 1.227 to 0.567
 and coverage from 0.286 to 0.952. Rotation is very likely the dominant term.
+
+**3b. Image token cost is model-specific and varies by more than 4x.** The same
+prepped 1600px page costs qwen2.5vl:7b roughly 1600 tokens and
+granite3.2-vision:2b 7529. So "downscale to 1600px" is not a portable answer: the
+context budget has to be validated per model, and the setup wizard must check it
+when a user selects a model rather than assuming the default 4096 will do.
 
 **4. Course priming is what prevents the loop.** On Page A, plain prompting
 looped (CER 2.267, 57 seconds). The same image with a course glossary did not
@@ -72,21 +88,33 @@ preview a full editor rather than approve-or-reject.
 4. **Course priming is a required prompt stage.** The per-course glossary is
    load-bearing infrastructure, not a later enhancement.
 5. **Every transcript passes a degeneracy gate before reaching the preview.**
-   `packages/corpus/detect-degenerate.mjs` separated all eight recordings
-   correctly, rejecting exactly the four high-CER runs with no false positives.
-   A rejected transcript is retried once, then surfaced as a failed page with
-   the cropped original, never silently written.
+   `packages/corpus/detect-degenerate.mjs` classifies all 10 recordings
+   correctly against a CER > 0.6 ground truth: 6 rejected, 4 accepted, no false
+   positives and no false negatives. A rejected transcript is retried once, then
+   surfaced as a failed page with the cropped original, never silently written.
+
+   The detector needed three signals, and the third was only discovered because
+   granite was tested. Version one used identical-line and n-gram repetition, and
+   it **passed granite's Page B output at CER 1.709**, because that loop
+   incremented: `(in p. 1)`, `(in p. 2)`, and so on to 60. Every line is
+   technically distinct, so dedup scored it healthy. Normalising digits to `#`
+   before deduplicating catches it. The lesson generalises: a loop detector that
+   only looks for exact repetition will miss the loops that count.
 
 ## Caveats
 
-Two pages, one run each, one prompt pair, two models. This is enough to choose a
-direction and not enough to tune one. The coverage figure on primed runs is
-partly inflated because the course glossary shares vocabulary with the required
-term list, so **CER is the honest metric for the priming comparison** and it
-moves in the same direction regardless.
+Two pages, one run each, one prompt pair, four models of which one would not
+load. This is enough to choose a direction and not enough to tune one.
 
-`llama3.2-vision:11b` had not finished downloading when this was written and
-remains untested.
+The coverage figure on primed runs is partly inflated, because the course
+glossary shares vocabulary with the required term list, so **CER is the honest
+metric for the priming comparison**. It moves in the same direction regardless.
+
+**The degeneracy thresholds are tuned in-sample.** They were adjusted until they
+classified these 10 recordings correctly, so 10 out of 10 is a fit, not a
+generalisation estimate. They need re-validating against held-out recordings once
+the corpus is larger, and the thresholds are exported as parameters specifically
+so that is possible without editing the detector.
 
 ## Consequences
 

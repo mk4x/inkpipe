@@ -281,9 +281,11 @@ No UI work happens before the vertical slice is green.
 - ~~Sample photographs are not yet in the repo.~~ Added 2026-09-09, both pages
   present with hand-written references.
 - ~~Default model choice is deliberately unset.~~ Resolved: `qwen2.5vl:7b`.
-- **`llama3.2-vision:11b` is untested.** It had not finished downloading when
-  issue #1 was written up. Run `node spike.mjs --model llama3.2-vision:11b
-  --primed` once it is present and append the result to adr/0001.
+- ~~`llama3.2-vision:11b` is untested.~~ Resolved: it will not load on Ollama
+  0.33.3 (`unknown model architecture: 'mllama'`). Recheck after an Ollama
+  upgrade. `granite3.2-vision:2b` was also tested and rejected.
+- **Degeneracy thresholds are tuned in-sample** on 10 recordings. Re-validate
+  against held-out recordings once the corpus grows.
 - **The corpus has two pages.** That is enough to pick a direction and not
   enough to tune a prompt. Add pages before trusting any tuning.
 - **`prepForVault` currently emits 257 KB, against decision 24's roughly 200 KB

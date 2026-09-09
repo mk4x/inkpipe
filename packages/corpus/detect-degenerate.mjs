@@ -9,8 +9,15 @@
 // and would otherwise be written into a study note. It is cheap to detect, so
 // the pipeline should refuse it rather than show it to the user as a result.
 //
-// Both signals are needed: line repetition catches the block-level loop, ngram
-// repetition catches a loop that runs on inside a single long line.
+// Three signals are needed, each catching a loop the others miss:
+//
+//   line repetition     : the block-level loop, identical lines repeated.
+//   ngram repetition    : a loop running on inside a single very long line.
+//   template repetition : an INCREMENTING loop, where every line is technically
+//                         distinct. granite3.2-vision:2b emitted "(in p. 1)",
+//                         "(in p. 2)" ... "(in p. 60)". Dedup and ngram both
+//                         score that as healthy, because it is only repetitive
+//                         once you normalise the numbers away.
 
 /** Longest run of consecutive identical non-empty lines. */
 function maxConsecutiveLineRepeat(lines) {
@@ -37,8 +44,13 @@ function maxNgramRepeat(words, n) {
   return best;
 }
 
+/** Collapse the varying parts of a line so that an incrementing sequence
+ *  reduces to a single repeated template. */
+const toTemplate = (line) => line.replace(/\d+/g, '#').toLowerCase();
+
 export function detectDegenerate(text, {
   maxLineRepeatRatio = 0.5,
+  maxTemplateRepeatRatio = 0.6,
   maxConsecutive = 4,
   maxNgram = 5,
   ngramSize = 5,
@@ -52,12 +64,20 @@ export function detectDegenerate(text, {
   const lineRepeatRatio = lines.length ? 1 - distinct.size / lines.length : 0;
   const consecutive = maxConsecutiveLineRepeat(lines);
 
+  const distinctTemplates = new Set(lines.map(toTemplate));
+  const templateRepeatRatio = lines.length
+    ? 1 - distinctTemplates.size / lines.length
+    : 0;
+
   const words = text.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
   const ngram = maxNgramRepeat(words, ngramSize);
 
   const reasons = [];
   if (lineRepeatRatio > maxLineRepeatRatio) {
     reasons.push(`${Math.round(lineRepeatRatio * 100)}% of lines are duplicates`);
+  }
+  if (templateRepeatRatio > maxTemplateRepeatRatio) {
+    reasons.push(`${Math.round(templateRepeatRatio * 100)}% of lines share one template`);
   }
   if (consecutive > maxConsecutive) {
     reasons.push(`${consecutive} identical lines in a row`);
@@ -70,6 +90,7 @@ export function detectDegenerate(text, {
     degenerate: reasons.length > 0,
     reasons,
     lineRepeatRatio: Math.round(lineRepeatRatio * 1000) / 1000,
+    templateRepeatRatio: Math.round(templateRepeatRatio * 1000) / 1000,
     maxConsecutiveLines: consecutive,
     maxNgramRepeat: ngram,
     lines: lines.length,
