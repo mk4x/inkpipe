@@ -1,9 +1,12 @@
 # VPS setup
 
-**Status:** planned procedure. `ops/bootstrap-vps.sh` and `apps/server` do not
-exist yet, so steps 6 onward cannot be run today. Steps 1 to 5 are standard and
-are correct now. This document is written first so that the scripts are built to
-match it rather than the other way round.
+**Status:** the scripts exist and the server runs. `ops/bootstrap-vps.sh` has
+been syntax checked and dry-run, but has **not yet been executed against a real
+VPS**, so treat the first run as the real test and use `--dry-run` first.
+
+Managed by systemd rather than PM2: a self-hoster then needs no global npm
+install, and systemd can sandbox the process (see the unit in
+`ops/bootstrap-vps.sh`).
 
 The design is derived from the owner's existing production setup in
 `saas-backend` (`ops/bootstrap-vps.sh`, `docs/structural/deployment.md`), reduced
@@ -32,22 +35,30 @@ Nothing in this document is Hetzner specific. Any provider works.
 
 ---
 
-## 1. Create the box and a non-root user
+## 1. Create the box and an admin user
 
-Never run the service as root, and never SSH as root after this step.
+Never SSH as root after this step.
+
+Note the two different accounts, which must not be the same one:
+
+| account | purpose | shell |
+|---|---|---|
+| `deploy` | the human you SSH in as | yes |
+| `inkpipe` | owns the running service, created by the bootstrap script | **no login** |
 
 ```bash
 ssh root@YOUR_SERVER_IP
 
-adduser --disabled-password --gecos '' inkpipe
-mkdir -p /home/inkpipe/.ssh
-cp /root/.ssh/authorized_keys /home/inkpipe/.ssh/
-chown -R inkpipe:inkpipe /home/inkpipe/.ssh
-chmod 700 /home/inkpipe/.ssh
-chmod 600 /home/inkpipe/.ssh/authorized_keys
+adduser --disabled-password --gecos '' deploy
+mkdir -p /home/deploy/.ssh
+cp /root/.ssh/authorized_keys /home/deploy/.ssh/
+chown -R deploy:deploy /home/deploy/.ssh
+chmod 700 /home/deploy/.ssh
+chmod 600 /home/deploy/.ssh/authorized_keys
+usermod -aG sudo deploy
 ```
 
-Confirm you can log in as `inkpipe` **in a second terminal** before closing the
+Confirm you can log in as `deploy` **in a second terminal** before closing the
 root session. Locking yourself out here is the classic mistake.
 
 ## 2. Harden SSH
@@ -84,14 +95,21 @@ ufw status
 The service port is never exposed. nginx is the only thing that talks to it, over
 loopback.
 
-## 4. Node and pm2
+## 4. Node
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs git
-sudo npm install -g pm2
-pm2 startup    # then run the command it prints
+node -v    # must be 24 or newer
 ```
+
+Node 24 is a hard requirement, not a preference: the server uses `node:sqlite`
+and runs TypeScript directly, so there is no build step and no native toolchain.
+The bootstrap script checks the version and refuses to continue on anything
+older.
+
+There is no PM2 here. systemd runs the service, so a self-hoster needs no global
+npm install and the process can be sandboxed.
 
 ## 5. nginx and TLS
 
@@ -120,43 +138,57 @@ Then:
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-## 6. Install inkpipe (not yet available)
+## 6. Install inkpipe
 
 ```bash
-sudo mkdir -p /var/www/inkpipe /var/lib/inkpipe
-sudo chown inkpipe:inkpipe /var/www/inkpipe /var/lib/inkpipe
-
-sudo -u inkpipe git clone https://github.com/mk4x/inkpipe.git /var/www/inkpipe
+sudo git clone https://github.com/mk4x/inkpipe.git /var/www/inkpipe
 cd /var/www/inkpipe
-sudo -u inkpipe npm ci
-sudo -u inkpipe npm run build --workspace apps/server
+sudo npm ci --omit=dev
 ```
+
+There is no build step. The server runs TypeScript directly on Node 24, and uses
+`node:sqlite`, so there is no native toolchain to install. The checkout is owned
+by root and the data directory by the service user, so a compromised process
+cannot rewrite its own code.
 
 `/var/lib/inkpipe` holds the SQLite database and the blob store. Keep it off the
 repo checkout so a redeploy never touches your data.
 
-## 7. Bootstrap (not yet available)
+## 7. Bootstrap
+
+Look before you leap:
+
+```bash
+sudo bash /var/www/inkpipe/ops/bootstrap-vps.sh --dry-run
+```
+
+Then run it for real:
 
 ```bash
 sudo bash /var/www/inkpipe/ops/bootstrap-vps.sh
 ```
 
-Intended to be idempotent: safe to re-run, it checks current state and only
-changes what is wrong. It will create the data directories with correct
-ownership, write a minimal sudoers entry, install the pm2 service, and validate
-the result loudly rather than silently half-succeeding.
+Idempotent: it checks current state and changes only what is wrong. It creates
+the service user and data directory, generates a join token once (re-running
+never regenerates it, which would orphan an already-registered desktop), writes
+a sandboxed systemd unit, starts the service, and verifies `/health` answers
+before declaring success.
 
-## 8. Start and generate a join token (not yet available)
+It deliberately does **not** install nginx or issue certificates. It should not
+silently take over a web server that may already be serving other sites.
+
+## 8. The join token
+
+The bootstrap script prints it at the end, and stores it in `/etc/inkpipe.env`
+(mode 600, root only). To read it again:
 
 ```bash
-pm2 start ecosystem.config.cjs
-pm2 save
-
-sudo -u inkpipe node /var/www/inkpipe/apps/server/dist/cli.js issue-join-token
+sudo grep INKPIPE_JOIN_TOKEN /etc/inkpipe.env
 ```
 
-The token is single use and short lived. Paste it into the desktop setup wizard
-along with `https://inkpipe.YOUR_DOMAIN`. The wizard does the rest.
+Paste it into the desktop setup wizard along with `https://inkpipe.YOUR_DOMAIN`.
+It authenticates a desktop registering itself, and is not short lived: it stays
+valid so you can re-register after reinstalling. Treat it like a password.
 
 ## 9. Verify
 
@@ -184,18 +216,24 @@ transient (deleted on ack, 30 day TTL) and your phone keeps its own copy for
 fills anyway, something is wrong: check for a device that is uploading but never
 collecting.
 
-**Updates.** `git pull`, `npm ci`, `npm run build --workspace apps/server`,
-`pm2 restart inkpipe`.
+**Updates.** `sudo bash /var/www/inkpipe/ops/deploy.sh`. It fast-forwards to
+origin/main, reinstalls dependencies, restarts, and checks `/health`. If the new
+revision does not come up healthy it **rolls back automatically** to the previous
+commit and tells you. It refuses to deploy over local uncommitted edits.
 
-**Logs.** `pm2 logs inkpipe`.
+**Logs.** `journalctl -u inkpipe -f`.
+
+**Restart.** `sudo systemctl restart inkpipe`.
 
 ## If you already run other services on this box
 
-The owner's box already has nginx, Node, pm2, and a `deploy` user from
-`saas-backend`. In that case skip steps 1 to 4, add only the new nginx server
-block in step 5, and pick a service port that is not already taken. Ports 3010,
-3011, 3020, 3021, and 3030 are in use there, which is why inkpipe defaults to
-**3040**.
+The owner's box already has nginx, Node and a `deploy` user from `saas-backend`.
+In that case skip steps 1 to 4, add only the new nginx server block in step 5,
+and pick a service port that is not already taken. Ports 3010, 3011, 3020, 3021
+and 3030 are in use there, which is why inkpipe defaults to **3040**.
+
+inkpipe uses its own systemd unit and its own `inkpipe` service user, so it does
+not touch the existing PM2 setup or the `deploy` user.
 
 ## Threat model reminder
 
