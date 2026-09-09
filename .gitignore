@@ -30,3 +30,8 @@ inkpipe.config.json
 
 # built UI (rebuilt by npm run ui:build)
 apps/desktop/ui/dist/
+
+# Expo generates these from app.json via prebuild; they are not source.
+apps/phone/android/
+apps/phone/ios/
+apps/phone/.expo/

@@ -1,0 +1,14 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "paths": {
+      "@inkpipe/crypto": ["../../packages/crypto/src/index.ts"],
+      "@inkpipe/protocol": ["../../packages/protocol/src/index.ts"],
+      "@inkpipe/client": ["../../packages/client/src/index.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

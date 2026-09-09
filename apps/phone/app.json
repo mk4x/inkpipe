@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "inkpipe",
+    "slug": "inkpipe",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "android": {
+      "package": "dev.inkpipe.app",
+      "permissions": ["CAMERA"]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "inkpipe uses the camera to photograph your notes."
+        }
+      ],
+      "expo-secure-store"
+    ]
+  }
+}
