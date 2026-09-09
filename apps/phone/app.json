@@ -8,7 +8,9 @@
     "newArchEnabled": true,
     "android": {
       "package": "dev.inkpipe.app",
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA"
+      ]
     },
     "plugins": [
       [
@@ -17,7 +19,8 @@
           "cameraPermission": "inkpipe uses the camera to photograph your notes."
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-status-bar"
     ]
   }
 }
