@@ -1,0 +1,29 @@
+node_modules/
+dist/
+build/
+.next/
+target/
+
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+Thumbs.db
+
+# Expo
+.expo/
+*.jks
+*.keystore
+
+# Tauri
+apps/desktop/src-tauri/target/
+
+# Local model fixtures are committed, recordings are not
+packages/corpus/recordings/
+
+# Never commit a real config or any key material
+inkpipe.config.json
+*.pem
+*.key

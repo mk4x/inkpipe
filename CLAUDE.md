@@ -1,0 +1,117 @@
+# inkpipe - rules for agents and humans
+
+Read `docs/PREPARATION.md` first. It holds every design decision and the reason
+for it. If something here and something there disagree, PREPARATION.md wins and
+this file is wrong and must be fixed.
+
+## Project state
+
+Planning. `docs/PREPARATION.md` is approved-pending. There is no spec and no code
+yet. Do not write implementation code until `docs/SPEC.md` exists and issue #1
+(the model spike) has reported.
+
+## Hard rules
+
+### 1. No em dashes
+
+Never write U+2014 anywhere: code, comments, commit messages, docs, UI copy.
+Use a hyphen for compound words, a colon to introduce an explanation, parentheses
+for an aside, a full stop to split clauses, or a comma for a mild parenthetical.
+
+Enforced by `scripts/check-em-dashes.sh`, run in the pre-push hook and in CI.
+This rule is inherited from the owner's other repositories and is not negotiable.
+
+### 2. Nothing about the owner is hardcoded
+
+No vault path, semester number, course name, VPS hostname, poll interval, quota,
+or model name appears in source. All of it lives in the config schema and is
+collected by the setup wizard. A reviewer finding a hardcoded personal value
+should treat it as a bug, not a shortcut.
+
+### 3. The server never decodes an image
+
+`apps/server` must never import an image library, never inspect blob contents,
+and never parse anything out of a blob beyond its declared length. It stores
+ciphertext. Any pull request that gives the server the ability to look inside a
+blob breaks the security model in `docs/PREPARATION.md` section 8.
+
+### 4. Model output is data, never instruction
+
+The vision model returns JSON validated by zod. Its content is never executed,
+never used to build a file path without sanitisation, never followed as an
+instruction, and never used to construct a network request.
+
+### 5. Generated Markdown is inert
+
+Never emit a runnable code fence, `templater` syntax, a `dataview` block,
+`<script>`, an external image URL, or a wikilink that resolves outside the
+configured vault subtree. The owner has the Obsidian `execute-code` plugin
+installed, so a runnable fence in a generated note is a live code-execution path.
+
+### 6. Never auto-resolve a git conflict
+
+In the vault or in this repo. On a dirty vault tree, refuse and report. On a
+rejected push, `pull --rebase` and retry exactly once, then stop and surface the
+error to the human.
+
+### 7. Nothing reaches the vault without human approval
+
+The preview screen is the gate. No file write, no commit, and no push happens
+before the human approves.
+
+## Documentation rules
+
+Docs drift when the rule for updating them is vague. These are specific.
+
+| If you change | You must update, in the same commit |
+|---|---|
+| `packages/protocol/**` | `docs/SPEC.md` |
+| the config schema | `docs/SETUP.md` |
+| a decision recorded in PREPARATION.md section 6 | `docs/PREPARATION.md` **and** a new file in `docs/adr/` |
+| the stack, a dependency choice, or a cut feature | `docs/PREPARATION.md` sections 3 and 7 |
+| the test layers | `docs/PREPARATION.md` section 10 |
+| VPS setup steps or `ops/**` | `docs/VPS_SETUP.md` |
+| anything that changes a rule in this file | `CLAUDE.md` |
+
+The first two rows are enforced mechanically by CI and the pre-push hook. The
+rest are enforced by review. Do not reword a rule into something unverifiable.
+
+A decision is only reversed by editing `docs/PREPARATION.md` and writing an ADR
+that says what changed and why. Never silently contradict a recorded decision in
+code.
+
+## Workflow
+
+- Trunk is `main`. Direct pushes are fine. Branch only for awkward changes.
+- The gate is the `pre-push` hook: typecheck, lint, em dash check, fast tests.
+  CI is a backstop, not the gate, because pushes go straight to `main`.
+- `npm run eval` runs the real model against the golden corpus. It must pass
+  before pushing any prompt change. CI cannot run it, there is no GPU there.
+- Conventional commits.
+
+## Testing
+
+Seven layers, described in `docs/PREPARATION.md` section 10. The two that are
+easy to skip and must not be:
+
+- **Cross-language crypto vectors.** The phone encrypts in TypeScript, the
+  desktop decrypts in Rust. Two implementations means they can diverge. CI
+  asserts TS encrypt to Rust decrypt byte-for-byte.
+- **The golden corpus.** A prompt change that lowers transcription accuracy must
+  fail the build rather than silently degrade the notes.
+
+When a bug is found, add the failing case to the relevant corpus or test file
+before fixing it.
+
+## Layout
+
+```
+apps/phone          Expo dev build, TypeScript
+apps/desktop        Tauri v2, Rust core plus React and TypeScript UI
+apps/server         Fastify, SQLite, Node 24
+packages/protocol   zod wire schemas, shared by all three surfaces
+packages/crypto     TypeScript crypto wrappers
+packages/corpus     golden images, expected transcripts, scorer
+docs/               PREPARATION.md, SPEC.md, SETUP.md, VPS_SETUP.md, adr/
+ops/                bootstrap-vps.sh, deploy.sh
+```
