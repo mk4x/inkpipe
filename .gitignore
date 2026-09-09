@@ -45,3 +45,9 @@ config.json
 secrets.json
 keys.json
 research.json
+
+# Anything a key might get pasted into. The leak this prevents already
+# happened once: an API key sat in "New Text Document.txt" and a "git add -A"
+# swept it into a public commit.
+*.txt
+!requirements*.txt
