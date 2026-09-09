@@ -1,0 +1,29 @@
+{
+  "name": "inkpipe",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Photograph handwritten notes, get formatted Markdown in your Obsidian vault.",
+  "license": "MIT",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"packages/*/test/*.test.ts\" \"apps/*/test/*.test.ts\"",
+    "check:emdash": "bash scripts/check-em-dashes.sh",
+    "check:docs": "bash scripts/check-doc-drift.sh",
+    "verify": "npm run check:emdash && npm run test",
+    "eval": "node packages/corpus/spike.mjs --model qwen2.5vl:7b --primed --prompt minimal"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^1.2.1",
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.1",
+    "fastify": "^5.2.1",
+    "zod": "^3.24.1"
+  }
+}

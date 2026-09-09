@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Decision 22: pushes go straight to main, so the gate has to live here rather
+# than in CI. CI is the backstop, not the gate.
+#
+# Install with:  git config core.hooksPath .githooks
+# Bypass with:   git push --no-verify   (documented escape hatch)
+set -uo pipefail
+
+cd "$(dirname "$0")/.."
+
+echo "pre-push: em dash check"
+bash scripts/check-em-dashes.sh || exit 1
+
+echo "pre-push: documentation drift"
+bash scripts/check-doc-drift.sh || exit 1
+
+echo "pre-push: tests"
+npm test --silent || exit 1
+
+echo "pre-push: all checks passed"
