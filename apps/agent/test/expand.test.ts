@@ -166,7 +166,7 @@ describe('prompts', () => {
 describe('rendering', () => {
   const expansion = (over: Partial<Expansion>): Expansion => ({
     term: 'meld', text: 'Meld merges two heaps.', confidence: 'high',
-    reason: null, agreement: 1, ...over,
+    reason: null, agreement: 1, sources: [], ...over,
   });
 
   test('marks everything as model-added, per decision 20', async () => {

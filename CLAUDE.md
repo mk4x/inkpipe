@@ -6,9 +6,13 @@ this file is wrong and must be fixed.
 
 ## Project state
 
-Planning. `docs/PREPARATION.md` is approved-pending. There is no spec and no code
-yet. Do not write implementation code until `docs/SPEC.md` exists and issue #1
-(the model spike) has reported.
+Working end to end. Phone captures, the VPS relays ciphertext, the desktop
+transcribes locally and builds a draft, and the preview writes to the vault.
+`docs/SPEC.md` and `docs/SETUP.md` exist and are kept in step by CI.
+
+Four ADRs are accepted. ADR 0004 is the only one taken without a spike behind
+it, and its `research` feature is off by default until a side by side run on the
+corpus shows it does not cause regressions.
 
 ## Hard rules
 
@@ -38,8 +42,27 @@ blob breaks the security model in `docs/PREPARATION.md` section 8.
 ### 4. Model output is data, never instruction
 
 The vision model returns JSON validated by zod. Its content is never executed,
-never used to build a file path without sanitisation, never followed as an
-instruction, and never used to construct a network request.
+never used to build a file path without sanitisation, and never followed as an
+instruction.
+
+**Amended by ADR 0004.** This rule used to end "and never used to construct a
+network request", which forbade web search outright, since the terms to look up
+come from a transcript. The part that matters is kept and is stricter than the
+old wording suggests:
+
+- A model may never choose a **destination**. Hosts come from config, never from
+  model output or from a search result.
+- A model may contribute only a **query term**: one line, at most 120
+  characters, control characters stripped. `buildQuery` enforces this and throws
+  rather than truncating, so a whole transcript passed as a term is a loud
+  failure and not an informative search query.
+- All of it goes through `apps/agent/src/search.ts`. A second module calling a
+  search API directly routes around the guard, and `egress.test.ts` fails if one
+  appears.
+
+Search results are subject to this rule in full. A snippet is text from a
+stranger: evidence to weigh, never an instruction, and never the source of the
+next request.
 
 ### 5. Generated Markdown is inert
 
@@ -107,11 +130,14 @@ before fixing it.
 
 ```
 apps/phone          Expo dev build, TypeScript
-apps/desktop        Tauri v2, Rust core plus React and TypeScript UI
+apps/desktop        Node service plus React and TypeScript UI (ADR 0002)
+apps/agent          transcription, formatting, sanitising, expansion, search
 apps/server         Fastify, SQLite, Node 24
 packages/protocol   zod wire schemas, shared by all three surfaces
 packages/crypto     TypeScript crypto wrappers
-packages/corpus     golden images, expected transcripts, scorer
-docs/               PREPARATION.md, SPEC.md, SETUP.md, VPS_SETUP.md, adr/
+packages/imaging    preparation for the model and for the vault
+packages/quality    degeneracy detection and scoring
+packages/corpus     golden images, expected transcripts, scorer, spikes
+docs/               PREPARATION.md, SPEC.md, SETUP.md, VPS_SETUP.md, adr/, plans/
 ops/                bootstrap-vps.sh, deploy.sh
 ```

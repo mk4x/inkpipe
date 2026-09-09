@@ -96,6 +96,32 @@ export const Config = z.object({
     maxTermsPerNote: z.number().int().min(1).max(50).default(12),
   }).default({}),
 
+  // --- research (ADR 0004) ---
+  /** Checking expansions against web search snippets.
+   *
+   *  Off by default, and not only for privacy. Retrieval helps on obscure
+   *  material and hurts on well known material, so it stays off until a side by
+   *  side run on the corpus shows it does not cause regressions.
+   *
+   *  The API key is deliberately NOT here. It lives in the secrets file beside
+   *  the keystore, because a config holding vault paths and course names is the
+   *  file someone pastes into an issue when asking for help. */
+  research: z.object({
+    enabled: z.boolean().default(false),
+    provider: z.enum(['google']).default('google'),
+    /** Programmable Search Engine id. Not a secret, unlike the key. */
+    cx: z.string().default(''),
+    /** Google's free tier is 100 a day. Refuses to search past this rather
+     *  than degrading silently to unsourced expansion. */
+    maxQueriesPerDay: z.number().int().min(0).max(10_000).default(100),
+    /** Snippets read per term. Each one is a small model call. */
+    snippetsPerTerm: z.number().int().min(1).max(10).default(5),
+    /** A term means the same thing next week, and a semester of notes repeats
+     *  terms heavily, so the cache is what keeps the free tier sufficient.
+     *  Zero means never expire. */
+    cacheMaxAgeDays: z.number().int().min(0).max(3650).default(90),
+  }).default({}),
+
   // --- behaviour ---
   /** Decision 13: 60 second default, configurable. */
   pollSeconds: z.number().int().min(10).max(3600).default(60),

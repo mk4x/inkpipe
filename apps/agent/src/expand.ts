@@ -6,49 +6,95 @@
 // fails: a 7B asked to explain a term produces fluent, plausible, sometimes
 // wrong text, and wrong text in study notes is worse than no text.
 //
-// Three checks, measured in packages/corpus/*-spike.mjs before this was built:
+// Checks, each measured in packages/corpus/*-spike.mjs before it was built:
 //
 //   REFUSAL       The model may say it does not know. Measured 3/3 invented
 //                 terms refused on both qwen2.5:7b and 14b. This works.
 //
 //   CONTRADICTION Does the explanation conflict with the page it came from?
 //                 Measured 8/8 on hand-labelled claims: caught all four wrong
-//                 ones, passed all four correct ones. This is the real gate.
+//                 ones, passed all four correct ones. This is the page gate.
 //
 //   CONSISTENCY   Same question asked N times. Measured to catch a model that
 //                 is UNSURE, and measured to MISS a model that is reliably
 //                 wrong: 14b said three times that a leftist heap rank is "the
 //                 number of nodes in the subtree", which is wrong, and a
-//                 consistency judge passed it. So this is a secondary signal
-//                 only, never the gate.
+//                 consistency judge passed it. Secondary signal only.
 //
-// The ordering matters. Contradiction is checked against the transcript because
-// the transcript is what the student actually wrote down in the lecture, which
-// is the only ground truth available for material too new to be in their notes.
+//   SOURCES       ADR 0004. Search snippets, read one at a time in evidence.ts.
+//                 The first check in this list that is not the model grading
+//                 its own homework.
+//
+// Why sources were added. The contradiction gate asks "does this conflict with
+// the page", and the page is keywords, so usually there is nothing to conflict
+// with and the gate passes whatever the model believed. There was no external
+// authority anywhere in the loop.
+//
+// Why sources do not get the final say. Retrieval helps on obscure material and
+// hurts on well known material, where the model's own knowledge is strong and
+// the average search result is a content farm. So sources get a vote, not a
+// veto: they can label an explanation, and they can only WRITE one in the
+// single case where the model refused and there is nothing to corrupt.
+//
+// The one place sources outrank the page is the disputed outcome, and even
+// there nothing is decided: both sides are shown to the human, because a page
+// that is wrong is exactly the case the page-as-ground-truth gate handles
+// badly.
 
-export type Confidence = 'high' | 'low' | 'refused' | 'contradicted';
+import {
+  readEvidence, citations, looksInvented, fromSourcesPrompt, SOURCES_INSUFFICIENT,
+  type Evidence, type ModelFn,
+} from './evidence.ts';
+import type { SearchResult } from './search.ts';
+
+export type Confidence =
+  /** Explained, the page agrees or is silent, sources back it. */
+  | 'high'
+  /** Explained and kept, with a stated reservation. */
+  | 'low'
+  /** Explained, the page is silent, and the sources argue against it. */
+  | 'unsupported'
+  /** The page contradicts it but the sources back it. The page may be wrong. */
+  | 'disputed'
+  /** The page contradicts it and nothing rescues it. Discarded. */
+  | 'contradicted'
+  /** The model does not know it, and sources did not fill the gap. */
+  | 'refused'
+  /** The model did not know it. Written from sources alone. */
+  | 'sourced';
 
 export interface Expansion {
   term: string;
   /** Empty when refused or contradicted. */
   text: string;
   confidence: Confidence;
-  /** Why it was rejected, shown in the preview rather than hidden. */
+  /** Why it was rejected or qualified, shown in the preview rather than hidden. */
   reason: string | null;
   /** Agreement across samples, null when there was nothing to compare. */
   agreement: number | null;
+  /** Search results that were judged relevant. Empty when research is off. */
+  sources: SearchResult[];
+}
+
+export interface ResearchOptions {
+  /** Injected, so expansion knows nothing about providers, caches or budgets.
+   *  A reason means the search could not run, which is not the same as running
+   *  and finding nothing, and the two are never conflated. */
+  lookup: (term: string) => Promise<{ results: SearchResult[]; reason: string | null }>;
 }
 
 export interface ExpandOptions {
-  /** The page transcript. Ground truth for the contradiction check. */
+  /** The page transcript. The gate checks explanations against this. */
   notes: string;
   course?: string;
   /** Injected, so tests need no model and the fixture layer can sit in front. */
-  model: (prompt: string, options?: { temperature?: number }) => Promise<string>;
-  /** Samples per term. 1 disables the consistency signal. */
+  model: ModelFn;
+  /** Samples per term for the consistency signal. 1 disables it. */
   samples?: number;
   /** Terms whose agreement falls below this are marked low confidence. */
   agreementThreshold?: number;
+  /** Omit to expand exactly as before ADR 0004, with no network at all. */
+  research?: ResearchOptions;
 }
 
 const REFUSAL = 'I do not know this term';
@@ -108,11 +154,160 @@ export function agreementPrompt(a: string, b: string): string {
 
 // ---------------------------------------------------------------------------
 
+function refused(term: string, reason: string): Expansion {
+  return { term, text: '', confidence: 'refused', reason, agreement: null, sources: [] };
+}
+
 /**
- * Expand one term, with all three checks.
+ * The model refused, so there is no explanation to protect.
  *
- * Never throws for a term it cannot handle: a refused or contradicted term is a
- * normal outcome that the preview shows, not an error that aborts the page.
+ * This is the only path where sources may write rather than judge. It is also
+ * where retrieval is most likely to help: a term the model does not know is by
+ * definition not one where its own knowledge was strong.
+ */
+async function explainFromSources(term: string, options: ExpandOptions): Promise<Expansion> {
+  if (!options.research) {
+    return refused(term, 'the model said it does not know this term');
+  }
+
+  const { results, reason } = await options.research.lookup(term);
+  if (reason) {
+    return refused(term, `the model does not know this term, and it could not be looked up: ${reason}`);
+  }
+  if (results.length === 0) {
+    return refused(term, 'the model does not know this term, and no sources were found for it');
+  }
+
+  const draft = (await options.model(
+    fromSourcesPrompt(term, results, options.course),
+    { temperature: 0 },
+  )).trim();
+
+  if (draft.length === 0 || draft.toLowerCase().includes(SOURCES_INSUFFICIENT)) {
+    return refused(term, 'the model does not know this term, and the sources did not explain it');
+  }
+
+  // The snippets are read against the draft, not against the term, so a draft
+  // that drifted past what the sources actually said is caught here.
+  const evidence = await readEvidence(draft, results, { model: options.model });
+  if (looksInvented(evidence)) {
+    return refused(term, 'no source discusses this term, so it may not exist');
+  }
+  if (evidence.verdict === 'refuted') {
+    return refused(term, 'the sources contradicted every explanation of this term');
+  }
+
+  // Still has to clear the page. Sources never outrank the notes silently.
+  const verdict = (await options.model(
+    contradictionPrompt(draft, options.notes),
+    { temperature: 0 },
+  )).trim().toUpperCase();
+
+  if (verdict.startsWith('CONTRADICT')) {
+    return {
+      term,
+      text: draft,
+      confidence: 'disputed',
+      reason: 'written from sources, but it conflicts with what the page says',
+      agreement: null,
+      sources: citations(evidence),
+    };
+  }
+
+  return {
+    term,
+    text: draft,
+    confidence: 'sourced',
+    reason: 'the model did not know this term, so this was written from the sources listed',
+    agreement: null,
+    sources: citations(evidence),
+  };
+}
+
+/** Combine the page verdict and the source verdict into an outcome. */
+function combine(
+  term: string,
+  text: string,
+  pageContradicts: boolean,
+  evidence: Evidence | null,
+  agreement: number | null,
+  softReason: string | null,
+): Expansion {
+  const sources = evidence ? citations(evidence) : [];
+
+  // No research configured. Exactly the pre-ADR-0004 behaviour.
+  if (!evidence) {
+    if (pageContradicts) {
+      return {
+        term, text: '', confidence: 'contradicted',
+        reason: 'the explanation conflicted with what the page says',
+        agreement: null, sources: [],
+      };
+    }
+    return {
+      term, text, confidence: softReason ? 'low' : 'high',
+      reason: softReason, agreement, sources: [],
+    };
+  }
+
+  if (pageContradicts) {
+    // The interesting case. The page says one thing, the sources say another.
+    // Nothing is resolved here: both are surfaced and the human decides, which
+    // is the only honest handling of a page that might itself be wrong.
+    if (evidence.verdict === 'supported') {
+      return {
+        term, text, confidence: 'disputed',
+        reason: 'this conflicts with the page, but the sources below support it, so the page may be wrong',
+        agreement, sources,
+      };
+    }
+    return {
+      term, text: '', confidence: 'contradicted',
+      reason: 'the explanation conflicted with what the page says',
+      agreement: null, sources: [],
+    };
+  }
+
+  // The page is silent or agrees. Sources may qualify, never delete: a content
+  // farm outranking a correct explanation is the regression this feature has to
+  // avoid, so a refutation is shown to the human rather than acted on.
+  if (evidence.verdict === 'refuted') {
+    return {
+      term, text, confidence: 'unsupported',
+      reason: 'the sources below argue against this, and the page does not settle it',
+      agreement, sources,
+    };
+  }
+  if (evidence.verdict === 'mixed') {
+    return {
+      term, text, confidence: 'unsupported',
+      reason: 'the sources below disagree with each other about this',
+      agreement, sources,
+    };
+  }
+  if (evidence.verdict === 'unverified') {
+    return {
+      term, text, confidence: 'low',
+      reason: evidence.unavailable
+        ? `not checked against sources: ${evidence.unavailable}`
+        : 'no source was found that discusses this, so it is unverified',
+      agreement, sources,
+    };
+  }
+
+  // Supported. A soft reason from the consistency signal still applies.
+  return {
+    term, text, confidence: softReason ? 'low' : 'high',
+    reason: softReason, agreement, sources,
+  };
+}
+
+/**
+ * Expand one term, with every check.
+ *
+ * Never throws for a term it cannot handle: a refused, contradicted or disputed
+ * term is a normal outcome that the preview shows, not an error that aborts the
+ * page.
  */
 export async function expandTerm(term: string, options: ExpandOptions): Promise<Expansion> {
   const samples = Math.max(1, options.samples ?? 3);
@@ -129,36 +324,18 @@ export async function expandTerm(term: string, options: ExpandOptions): Promise<
   }
 
   const answered = drafts.filter((d) => !refuses(d) && d.length > 0);
-
-  if (answered.length === 0) {
-    return {
-      term,
-      text: '',
-      confidence: 'refused',
-      reason: 'the model said it does not know this term',
-      agreement: null,
-    };
-  }
+  if (answered.length === 0) return explainFromSources(term, options);
 
   // The longest answer is the candidate: it carries the most claims, so it is
-  // the hardest to sneak an error through the contradiction check with.
+  // the hardest to sneak an error through the checks with.
   const candidate = answered.slice().sort((a, b) => b.length - a.length)[0];
 
-  // THE GATE. Temperature 0: a judgement, not a sample.
+  // The page gate. Temperature 0: a judgement, not a sample.
   const verdict = (await options.model(
     contradictionPrompt(candidate, options.notes),
     { temperature: 0 },
   )).trim().toUpperCase();
-
-  if (verdict.startsWith('CONTRADICT')) {
-    return {
-      term,
-      text: '',
-      confidence: 'contradicted',
-      reason: 'the explanation conflicted with what the page says',
-      agreement: null,
-    };
-  }
+  const pageContradicts = verdict.startsWith('CONTRADICT');
 
   // Secondary signal. Catches wobble, not systematic error.
   let agreement: number | null = null;
@@ -180,16 +357,22 @@ export async function expandTerm(term: string, options: ExpandOptions): Promise<
 
   const partiallyRefused = answered.length < drafts.length;
   const unstable = agreement !== null && agreement < threshold;
+  const softReason = unstable ? 'the model gave different answers each time'
+    : partiallyRefused ? 'the model only sometimes claimed to know this'
+      : null;
 
-  return {
-    term,
-    text: candidate,
-    confidence: partiallyRefused || unstable ? 'low' : 'high',
-    reason: unstable ? 'the model gave different answers each time'
-      : partiallyRefused ? 'the model only sometimes claimed to know this'
-        : null,
-    agreement,
-  };
+  // Sources. Run even on a contradicted term, because a page the owner wrote
+  // wrongly is precisely the case that needs a second opinion.
+  let evidence: Evidence | null = null;
+  if (options.research) {
+    const { results, reason } = await options.research.lookup(term);
+    evidence = await readEvidence(candidate, results, {
+      model: options.model,
+      unavailable: reason,
+    });
+  }
+
+  return combine(term, candidate, pageContradicts, evidence, agreement, softReason);
 }
 
 /** Expand several terms. Sequential on purpose: one model, one GPU. */
@@ -199,12 +382,29 @@ export async function expandTerms(terms: string[], options: ExpandOptions): Prom
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+/** Bare hostname, so a citation reads as a source rather than a URL. */
+function host(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
 /**
- * Render accepted expansions as a Markdown section.
+ * Render expansions as a Markdown section.
  *
- * Decision 20: anything the model added and is not on the page is marked. Low
- * confidence is marked differently from high, because "the model was unsure"
- * is information the reader needs while revising.
+ * Decision 20: anything the model added and is not on the page is marked, with
+ * each level of doubt marked differently, because "the model was unsure" and
+ * "the sources disagree with your notes" are things a reader needs while
+ * revising and cannot recover later.
+ *
+ * Links are plain text, not Markdown links. CLAUDE.md rule 5: generated
+ * Markdown is inert, and these URLs came from a search engine.
  */
 export function renderExpansions(expansions: Expansion[]): string {
   const usable = expansions.filter((e) => e.text.length > 0);
@@ -218,14 +418,40 @@ export function renderExpansions(expansions: Expansion[]): string {
 
   const lines: string[] = ['', '## Explanations', ''];
 
-  if (usable.length > 0) {
+  const settled = usable.filter((e) => e.confidence === 'high' || e.confidence === 'low');
+  const flagged = usable.filter((e) => e.confidence !== 'high' && e.confidence !== 'low');
+
+  const entry = (e: Expansion, marker: string): string[] => {
+    const out = [`**${e.term}**${marker}`, '', e.text, ''];
+    if (e.reason && marker !== '') out.push(`*${e.reason}*`, '');
+    // Tolerant of an absent list rather than typed-and-trusted: this renders
+    // into the vault, and a crash here would lose a whole note over a missing
+    // field that carries no meaning of its own.
+    const sources = e.sources ?? [];
+    if (sources.length > 0) {
+      out.push(`Sources: ${sources.map((s) => host(s.url)).join(', ')}`, '');
+    }
+    return out;
+  };
+
+  if (settled.length > 0) {
     lines.push('> [!note] Added by the model, not on the page');
     lines.push('> Each entry was checked against the page and did not contradict it.');
     lines.push('');
+    for (const e of settled) {
+      lines.push(...entry(e, e.confidence === 'low' ? ' *(uncertain)*' : ''));
+    }
+  }
 
-    for (const e of usable) {
-      const marker = e.confidence === 'low' ? ' *(uncertain)*' : '';
-      lines.push(`**${e.term}**${marker}`, '', e.text, '');
+  if (flagged.length > 0) {
+    lines.push('> [!warning] Check these yourself');
+    lines.push('> The page and the sources did not agree, or the sources argued against it.');
+    lines.push('');
+    for (const e of flagged) {
+      const marker = e.confidence === 'disputed' ? ' *(disputed)*'
+        : e.confidence === 'unsupported' ? ' *(unsupported)*'
+          : ' *(from sources)*';
+      lines.push(...entry(e, marker));
     }
   }
 

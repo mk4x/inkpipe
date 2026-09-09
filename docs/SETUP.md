@@ -138,6 +138,15 @@ account was created instead.
     "maxTermsPerNote": 12
   },
 
+  "research": {
+    "enabled": false,
+    "provider": "google",
+    "cx": "",
+    "maxQueriesPerDay": 100,
+    "snippetsPerTerm": 5,
+    "cacheMaxAgeDays": 90
+  },
+
   "pollSeconds": 60,
   "verbosity": "cleaned",
   "cloudEscalationEnabled": false
@@ -222,6 +231,51 @@ linearly and detects wobble, never systematic error, so 3 is plenty.
 
 Budget roughly 8 to 12 seconds per term. A page of 10 terms is about two
 minutes, which is why `maxTermsPerNote` exists.
+
+**`research`** checks those explanations against web search. Off by default.
+
+The contradiction gate above asks whether an explanation conflicts with your
+page. Your pages are keywords, so usually there is nothing to conflict with and
+the gate passes whatever the model believed. Research adds the first check in
+the chain that is not the model grading its own work. See
+[adr/0004](adr/0004-sources-vote-they-do-not-veto.md).
+
+Only **snippets** are read, meaning the extract the search engine already shows
+under each result. Result pages are never fetched, which removes HTML parsing,
+redirects, paywalls and bot walls in one go, and keeps five sources inside the
+model's context where five full pages would not fit.
+
+Two more outcomes become possible:
+
+| outcome | what happens |
+|---|---|
+| **disputed** | the page and the sources disagree. Kept, flagged, both shown |
+| **unsupported** | the page is silent and the sources argue against it. Kept, flagged |
+| **sourced** | the model did not know the term, so it was written from sources |
+
+Sources can label an explanation and can only write one when the model refused
+outright. They never overrule your page silently, and they never delete an
+explanation: retrieval helps on obscure material and hurts on well known
+material, so a content farm must not be able to outrank a correct answer.
+
+**disputed is the one to watch.** It means the sources back an explanation your
+page contradicts, which usually means the page is wrong. That is a note worth
+re-reading, and it is the case the gate could not detect before.
+
+To set it up you need a Google Programmable Search Engine, configured to search
+the entire web, plus its engine id and an API key. The engine id goes in `cx`
+here. **The API key does not go in this file**, because this file holds vault
+paths and course names and is the one people paste into an issue when asking for
+help. It lives beside the keystore.
+
+The free tier is 100 queries a day. `maxQueriesPerDay` refuses to search past
+that rather than silently reverting to unsourced expansion, and the term cache
+does the real work of staying inside it, since a semester of notes repeats terms
+heavily. Terms are cached for `cacheMaxAgeDays`; set it to 0 to never expire.
+
+Queries are one term each. A term is capped at 120 characters and must be a
+single line, enforced in code rather than by convention, so note content cannot
+reach a search engine by accident.
 
 One limit worth knowing: the check compares an explanation against the
 transcript. If the transcript itself is wrong, an explanation that agrees with

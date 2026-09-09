@@ -1,10 +1,22 @@
 # Plan: web grounded expansion
 
-**Status:** agreed with the owner, not built.
+**Status:** built. Superseded by
+[adr/0004](../adr/0004-sources-vote-they-do-not-veto.md) and decision 31.
 **Date:** 2026-09-09
-**Becomes:** ADR 0004 when implemented, plus decision 31 in PREPARATION.md.
 
-Written so a fresh session can pick this up without re-deriving it.
+Kept as the record of what was agreed before building. Two things changed while
+building, both recorded in the ADR:
+
+- **A contradicted term still costs a query.** The plan said it would not. It
+  has to, because the whole point of a second authority is the case where the
+  page itself is wrong, and skipping the search there skips exactly that case.
+- **A `disputed` outcome was added.** The plan's matrix had no cell for "the
+  page contradicts it but the sources back it". That is the outcome the owner's
+  own test plan targets, since he intends to write notes that are wrong on
+  purpose.
+
+What did not change: snippets only, Google, sources cannot delete an
+explanation, and off by default until measured.
 
 ## The hole this closes
 

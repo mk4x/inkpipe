@@ -51,7 +51,17 @@ const ALLOWED = [
   /^https:\/\/ollama\.com\/install\.sh$/,
   /^https:\/\/inkpipe\.example\.com$/,
   /^https:\/\/github\.com\/mk4x\/inkpipe$/,
+  // ADR 0004. The one deliberate addition, and the reason this guard exists:
+  // it forced the change to be argued for rather than slipped in. This is the
+  // Programmable Search JSON API endpoint and nothing else on that host. It is
+  // reached only when the user has configured a key, only with a single line
+  // length capped term, and never with note content. Those are asserted in
+  // search.test.ts and expand-research.test.ts, not here.
+  /^https:\/\/www\.googleapis\.com\/customsearch\/v1$/,
 ];
+
+/** Shipped files permitted to name the search endpoint. Exactly one. */
+const SEARCH_MODULES = ['apps/agent/src/search.ts'];
 
 /** Destinations that would break the claim outright. */
 const FORBIDDEN = [
@@ -121,8 +131,33 @@ describe('network egress', () => {
 
   test('the allow list itself would reject a search engine', () => {
     // Negative control. An allow list that accepts everything protects nothing.
+    // Still meaningful after ADR 0004: the configured JSON API is permitted,
+    // scraping the search page itself is not.
     const url = 'https://www.google.com/search?q=leftist+heap';
     assert.equal(ALLOWED.some((a) => a.test(url)), false);
     assert.equal(FORBIDDEN.some((f) => f.pattern.test(url)), true);
+  });
+
+  test('only one shipped module knows how to reach the search endpoint', () => {
+    // Containment. Every query has to pass buildQuery, which enforces single
+    // line and length capped. A second module calling the API directly would
+    // route around that guard while leaving every other test green.
+    const offenders = files
+      .map((file) => ({
+        relative: file.slice(ROOT.length + 1).replace(/\\/g, '/'),
+        text: readFileSync(file, 'utf8'),
+      }))
+      .filter(({ text }) => /googleapis\.com|customsearch/.test(text))
+      .map(({ relative }) => relative)
+      .filter((relative) => !SEARCH_MODULES.includes(relative));
+
+    assert.deepEqual(offenders, [], 'search requests must go through apps/agent/src/search.ts');
+  });
+
+  test('the search module is present, so the check above is not vacuous', () => {
+    const known = files.map((f) => f.slice(ROOT.length + 1).replace(/\\/g, '/'));
+    for (const module of SEARCH_MODULES) {
+      assert.ok(known.includes(module), `${module} is missing, so containment proves nothing`);
+    }
   });
 });
