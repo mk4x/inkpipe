@@ -131,7 +131,9 @@ Every row was an explicit question with a recommendation and an answer.
 | 25 | Tooling | npm workspaces, plain scripts | Turborepo noted as a later option if CI becomes slow. |
 | 26 | Default model | `qwen2.5vl:7b`. `minicpm-v:8b` rejected | Measured in [adr/0001](adr/0001-local-first-transcription.md). minicpm produced degenerate output on both pages. |
 | 27 | Image prep and priming | Both are required pipeline stages, not settings | Raw pages hard-fail the default context, prep halves CER on the hard page, and priming is what stops the repetition loop. |
-| 28 | Degeneracy gate | Every transcript is checked for repetition loops before it reaches the preview | The failure mode is confidently wrong output returned with HTTP 200. Retry once, then surface as a failed page with the cropped original. Never write it silently. |
+| 28 | Degeneracy gate | Every transcript is checked for repetition loops before it reaches the preview | The failure mode is confidently wrong output returned with HTTP 200. **Retry must vary the prompt, not repeat it**: the failure is deterministic (5 identical runs), so a plain retry reproduces it exactly. Escalate to a simpler prompt, then surface as a failed page with the cropped original. Never write it silently. |
+| 29 | Prompt | `minimal` (two lines) is the default, and prompt complexity is a retry lever | Measured across 4 pages x 3 variants: fewer instructions gave better transcription on 3 of 4 pages, and were the only way to keep the hardest page out of a repetition loop. Instruction volume competes with the image for attention. |
+| 30 | Paper | Keep the grid paper. Do not buy blank paper | All 4 corpus pages are the same paper and span CER 0.110 to 0.485. The variance tracks layout, rotation and maths density, never the ruling. Grid also helps deskewing. |
 
 ## 7. Stack summary
 
@@ -286,8 +288,9 @@ No UI work happens before the vertical slice is green.
   upgrade. `granite3.2-vision:2b` was also tested and rejected.
 - **Degeneracy thresholds are tuned in-sample** on 10 recordings. Re-validate
   against held-out recordings once the corpus grows.
-- **The corpus has two pages.** That is enough to pick a direction and not
-  enough to tune a prompt. Add pages before trusting any tuning.
+- **The corpus has four pages** (added page C, dense maths, and page D, an
+  adversarial test page with a written prompt injection). Still small. Add more
+  before trusting any tuning.
 - **`prepForVault` currently emits 257 KB, against decision 24's roughly 200 KB
   target.** Either accept 257 KB or drop WebP quality from 80 to about 72. Not
   changed unilaterally because decision 24 names the number, and changing it

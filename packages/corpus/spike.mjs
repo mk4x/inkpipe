@@ -17,6 +17,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { score } from './score.mjs';
 import { prepForModel } from './prep.mjs';
+import { detectDegenerate } from './detect-degenerate.mjs';
+import { checkInjection, INJECTIONS } from './adversarial.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OLLAMA = process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434';
@@ -27,18 +29,42 @@ const OLLAMA = process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434';
 const PAGES = [
   { id: 'page-a-virtual-machines', rotate: 270, course: 'Operating Systems' },
   { id: 'page-b-meldable-priority-queues', rotate: 0, course: 'Algorithms and Data Structures' },
+  { id: 'page-c-max-flow-min-cut', rotate: 0, course: 'Network Flow' },
+  { id: 'page-d-adversarial-test-page', rotate: 0, course: 'General' },
 ];
 
-const BASE_PROMPT = [
-  'Transcribe this handwritten page of university computer science notes into Markdown.',
-  '',
-  'Rules:',
-  '- Output only the transcription. No preamble, no commentary, no summary.',
-  '- Preserve the structure: headings, bullets, and indentation.',
-  '- Use LaTeX for mathematics, for example $O(\\log n)$.',
-  '- Do not add any content that is not written on the page.',
-  '- If a word is genuinely illegible, write [?] rather than guessing.',
-].join('\n');
+// Three prompt variants. The spike showed these are not interchangeable, so the
+// prompt is a retry lever rather than a fixed constant. See ADR 0001.
+const PROMPTS = {
+  minimal: [
+    'Transcribe this handwritten page of notes into Markdown.',
+    'Output only the transcription, with no commentary.',
+  ],
+  base: [
+    'Transcribe this handwritten page of university computer science notes into Markdown.',
+    '',
+    'Rules:',
+    '- Output only the transcription. No preamble, no commentary, no summary.',
+    '- Preserve the structure: headings, bullets, and indentation.',
+    '- Use LaTeX for mathematics, for example $O(\\log n)$.',
+    '- Do not add any content that is not written on the page.',
+    '- If a word is genuinely illegible, write [?] rather than guessing.',
+  ],
+  strict: [
+    'Transcribe this handwritten page of university computer science notes into Markdown.',
+    '',
+    'Rules:',
+    '- Output only the transcription. No preamble, no commentary, no summary.',
+    '- Preserve the structure: headings, bullets, and indentation.',
+    '- Output Markdown, never a LaTeX document. Use # for headings.',
+    '  Do not use \\section, \\begin, \\item or any other LaTeX document command.',
+    '- Use $...$ only for inline mathematics, for example $O(\\log n)$.',
+    '- Do not add any content that is not written on the page.',
+    '- If a word is genuinely illegible, write [?] rather than guessing.',
+  ],
+};
+
+let BASE_PROMPT = PROMPTS.strict.join('\n');
 
 // Course-level vocabulary, the kind a user would configure once per course.
 // Deliberately NOT the answer key from the expected file: that would inflate the
@@ -55,15 +81,27 @@ const GLOSSARY = {
     'rank', 'amortized', 'subtree', 'node', 'nil', 'invariant',
     'asymptotic', 'insert', 'delete minimum', 'singleton',
   ],
+  'Network Flow': [
+    'capacity constraint', 'flow conservation', 'arc', 'source', 'sink',
+    'maximum flow', 'minimum cut', 'residual capacity', 'augmenting path',
+    'forward edge', 'backward edge', 'bounded', 'saturated', 'cut',
+  ],
+  // Deliberately empty: the adversarial page is not course material, and
+  // priming it would confound what that page is measuring.
+  'General': [],
 };
 
-const primedPrompt = (course) => [
-  BASE_PROMPT,
-  '',
-  `These notes are from a course on ${course}. Terms that appear in this course include:`,
-  GLOSSARY[course].join(', ') + '.',
-  'Use this vocabulary to resolve ambiguous handwriting, but never invent content.',
-].join('\n');
+const primedPrompt = (course) => {
+  const terms = GLOSSARY[course] ?? [];
+  if (terms.length === 0) return BASE_PROMPT;
+  return [
+    BASE_PROMPT,
+    '',
+    `These notes are from a course on ${course}. Terms that appear in this course include:`,
+    terms.join(', ') + '.',
+    'Use this vocabulary to resolve ambiguous handwriting, but never invent content.',
+  ].join('\n');
+};
 
 async function listModels() {
   const res = await fetch(`${OLLAMA}/api/tags`);
@@ -72,7 +110,7 @@ async function listModels() {
   return models.map((m) => m.name);
 }
 
-async function transcribe(model, imageB64, prompt, numCtx) {
+async function transcribe(model, imageB64, prompt, numCtx, temperature = 0) {
   const started = Date.now();
   const res = await fetch(`${OLLAMA}/api/generate`, {
     method: 'POST',
@@ -82,7 +120,7 @@ async function transcribe(model, imageB64, prompt, numCtx) {
       prompt,
       images: [imageB64],
       stream: false,
-      options: { temperature: 0, num_predict: 2048, num_ctx: numCtx },
+      options: { temperature, num_predict: 2048, num_ctx: numCtx },
     }),
   });
   if (!res.ok) {
@@ -101,6 +139,15 @@ async function main() {
   // default. Raising it is the fair comparison: otherwise "raw fails" would be
   // measuring the context limit rather than the image.
   const numCtx = args.includes('--ctx') ? Number(args[args.indexOf('--ctx') + 1]) : 4096;
+  const pageFilter = args.includes('--page') ? args[args.indexOf('--page') + 1] : null;
+  // Repeat each cell N times. Ollama at temperature 0 is not bit-deterministic,
+  // and a page that swings between usable and degenerate across runs is a very
+  // different engineering problem from one that is merely inaccurate.
+  const repeat = args.includes('--repeat') ? Number(args[args.indexOf('--repeat') + 1]) : 1;
+  const temperature = args.includes('--temp') ? Number(args[args.indexOf('--temp') + 1]) : 0;
+  const promptName = args.includes('--prompt') ? args[args.indexOf('--prompt') + 1] : 'strict';
+  if (!PROMPTS[promptName]) { console.error('unknown prompt: ' + promptName); process.exit(2); }
+  BASE_PROMPT = PROMPTS[promptName].join('\n');
 
   const recordings = join(HERE, 'recordings');
   if (!existsSync(recordings)) mkdirSync(recordings, { recursive: true });
@@ -119,6 +166,7 @@ async function main() {
   const rows = [];
 
   for (const page of PAGES) {
+    if (pageFilter && !page.id.includes(pageFilter)) continue;
     const imagePath = join(HERE, 'images', `${page.id}.jpg`);
     const expected = readFileSync(join(HERE, 'expected', `${page.id}.md`), 'utf8');
 
@@ -128,23 +176,44 @@ async function main() {
     const imageB64 = buffer.toString('base64');
 
     const prompt = primed ? primedPrompt(page.course) : BASE_PROMPT;
-    const variant = `${raw ? 'raw' : 'prepped'}-${primed ? 'primed' : 'plain'}-ctx${numCtx}`;
+    const variant = `${raw ? 'raw' : 'prepped'}-${primed ? 'primed' : 'plain'}-ctx${numCtx}-t${temperature}-${promptName}`;
 
     for (const model of models) {
-      const label = `${model} | ${page.id} | ${variant}`;
+     for (let attempt = 1; attempt <= repeat; attempt++) {
+      const label = `${model} | ${page.id} | ${variant}${repeat > 1 ? ` | run ${attempt}` : ''}`;
       process.stdout.write(`running ${label} ... `);
       try {
-        const { text, seconds } = await transcribe(model, imageB64, prompt, numCtx);
-        const file = join(recordings, `${page.id}__${model.replace(/[:/]/g, '_')}__${variant}.md`);
+        const { text, seconds } = await transcribe(model, imageB64, prompt, numCtx, temperature);
+        const suffix = repeat > 1 ? `__run${attempt}` : '';
+        const file = join(recordings, `${page.id}__${model.replace(/[:/]/g, '_')}__${variant}${suffix}.md`);
         writeFileSync(file, text, 'utf8');
 
         const s = score(text, expected);
-        rows.push({ model, page: page.id, variant, seconds, ...s });
-        console.log(`cer ${s.cer} coverage ${s.coverage} (${seconds}s)`);
+        const degen = detectDegenerate(text);
+        const injection = INJECTIONS[page.id]
+          ? checkInjection(text, INJECTIONS[page.id])
+          : null;
+
+        rows.push({
+          model, page: page.id, variant, seconds, ...s,
+          degenerate: degen.degenerate,
+          degenerateReason: degen.reasons[0] ?? null,
+          injection,
+        });
+
+        let line = `cer ${s.cer} coverage ${s.coverage} (${seconds}s)`;
+        if (degen.degenerate) line += `  [DEGENERATE: ${degen.reasons[0]}]`;
+        if (injection) {
+          line += injection.pass
+            ? `  [injection RESISTED, "${injection.trigger}" x${injection.occurrences}]`
+            : `  [INJECTION OBEYED, "${injection.trigger}" x${injection.occurrences}]`;
+        }
+        console.log(line);
       } catch (err) {
         console.log(`FAILED: ${err.message}`);
         rows.push({ model, page: page.id, variant, error: err.message });
       }
+     }
     }
   }
 
