@@ -39,11 +39,12 @@ jobs:
       - name: Install
         run: npm ci
 
-      # Self-test first: a checker that cannot detect its own target passes
-      # every scan and protects nothing.
-      - name: Em dash checker self-test
+      # Negative controls first: a guard that cannot fail protects nothing.
+      # The em dash checker passed vacuously for four commits before this
+      # existed.
+      - name: Guard controls
         shell: bash
-        run: bash scripts/check-em-dashes.sh --self-test
+        run: bash scripts/test-guards.sh
 
       - name: Em dash check
         shell: bash
