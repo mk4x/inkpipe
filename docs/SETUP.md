@@ -297,6 +297,7 @@ Three files sit beside each other in the config directory:
 | `keys.json` | device keys | restore from the recovery phrase |
 | `secrets.json` | the search API key | reissue it in Google's console |
 | `research.json` | cached snippets and today's query count | nothing, it refills |
+| `feedback.json` | what you thought of each page, and what you corrected | prompt quality degrades slowly |
 
 Status reports what is missing rather than just that research is off, so a
 half-finished setup says which step is outstanding.

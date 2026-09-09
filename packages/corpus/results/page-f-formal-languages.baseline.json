@@ -5,16 +5,14 @@
     "Micro syntax",
     "epsilon",
     "Kleene star",
-    "language",
-    "set",
     "alphabet",
     "ASCII",
-    "nums"
+    "syntax"
   ],
   "before": [
     {
       "term": "Micro syntax",
-      "text": "Micro syntax refers to the smallest units of a programming language, such as keywords (e.g., if, for, pass) and tokens (e.g., numbers), which are used to construct statements and expressions in the language.",
+      "text": "Micro syntax refers to the basic syntactic elements of a programming language, such as keywords (if, for, pass, etc.) and simple data types (like numbers), which form the building blocks for constructing larger language structures.",
       "confidence": "high",
       "reason": null,
       "agreement": 1,
@@ -22,7 +20,7 @@
     },
     {
       "term": "epsilon",
-      "text": "Epsilon ($\\epsilon$) represents the empty string, which is a string with zero characters. In the context of formal language theory, it is an element of the Kleene star closure $\\Sigma^*$ and is significant in defining certain operations and grammar rules.",
+      "text": "$\\epsilon$, or \"epsilon\", represents the empty string, which is a string with zero characters. In the context of formal languages, $\\epsilon$ is an element of $\\Sigma^*$ and is also denoted as $\\Sigma^0$.",
       "confidence": "high",
       "reason": null,
       "agreement": 1,
@@ -30,31 +28,15 @@
     },
     {
       "term": "Kleene star",
-      "text": "The Kleene star of a set $\\Sigma$, denoted $\\Sigma^*$, is the set of all possible strings including the empty string that can be formed from the elements of $\\Sigma$, including the empty string $\\epsilon$.",
+      "text": "The Kleene star $\\Sigma^*$ is the set of all possible strings, including the empty string, that can be formed from the elements of the alphabet $\\Sigma$.",
       "confidence": "high",
       "reason": null,
       "agreement": 1,
       "sources": []
     },
     {
-      "term": "language",
-      "text": "",
-      "confidence": "refused",
-      "reason": "the model said it does not know this term",
-      "agreement": null,
-      "sources": []
-    },
-    {
-      "term": "set",
-      "text": "A set, in the context of the notes provided, is a collection of distinct elements, in this case, strings of characters from the alphabet $\\Sigma$. The notes do not provide additional details about the set beyond this basic definition in relation to formal language theory.",
-      "confidence": "low",
-      "reason": "the model only sometimes claimed to know this",
-      "agreement": 1,
-      "sources": []
-    },
-    {
       "term": "alphabet",
-      "text": "The alphabet in the context of formal languages and compiler construction, denoted as $\\Sigma$, is the set of all possible positive characters, which can include letters, digits, and other symbols, but not the empty string $\\epsilon$.",
+      "text": "The alphabet $\\Sigma$ is a set of all positive characters, which can be considered as the basic symbols or elements from which strings or words are constructed, such as letters and digits in the context of formal languages.",
       "confidence": "high",
       "reason": null,
       "agreement": 1,
@@ -62,18 +44,18 @@
     },
     {
       "term": "ASCII",
-      "text": "ASCII stands for American Standard Code for Information Interchange. It is a character encoding standard that uses numbers to represent characters, but the notes do not provide further details about ASCII beyond this definition.",
-      "confidence": "low",
-      "reason": "the model only sometimes claimed to know this",
-      "agreement": 1,
-      "sources": []
-    },
-    {
-      "term": "nums",
       "text": "",
       "confidence": "refused",
       "reason": "the model said it does not know this term",
       "agreement": null,
+      "sources": []
+    },
+    {
+      "term": "syntax",
+      "text": "Syntax refers to the set of rules that define the structure of sentences in a language, specifying how symbols can be combined to form valid statements or expressions. In the context of formal languages, syntax is concerned with the formation of valid strings from an alphabet $\\Sigma$ according to specific grammar rules.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
       "sources": []
     }
   ]

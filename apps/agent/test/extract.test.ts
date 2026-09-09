@@ -7,7 +7,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTerms, extractTerms, extractPrompt } from '../src/expand.ts';
+import { parseTerms, extractTerms, extractPrompt, isTooGeneral } from '../src/expand.ts';
 
 const NOTES = [
   '# Compiler Construction',
@@ -74,6 +74,49 @@ describe('parseTerms', () => {
       'I hope this helps!',
     ].join('\n');
     assert.deepEqual(parseTerms(raw, NOTES, 12), ['parsing']);
+  });
+});
+
+describe('terms too general to be worth explaining', () => {
+  // Measured on corpus page F, which yielded "language", "set" and "nums".
+  // All three are written on the page, so the on-page guard passes them, and
+  // all three are useless: no source defines the bare word "language".
+  const GENERAL = [
+    '# Formal Languages',
+    '- a language is a set of words',
+    '- nums and strings',
+    '- formal language theory',
+    '- Kleene star',
+  ].join('\n');
+
+  test('a bare general word is dropped', () => {
+    assert.deepEqual(parseTerms('language\nset\nnums', GENERAL, 12), []);
+  });
+
+  test('the same word inside a real term is kept', () => {
+    // This is why the rule is single words only. Dropping every term that
+    // contains a common word would drop most of the good ones.
+    assert.deepEqual(parseTerms('formal language', GENERAL, 12), ['formal language']);
+  });
+
+  test('real terms are unaffected', () => {
+    assert.deepEqual(parseTerms('Kleene star', GENERAL, 12), ['Kleene star']);
+  });
+
+  test('case and punctuation do not let a general word through', () => {
+    assert.deepEqual(parseTerms('Language\nSETS.\n"set"', GENERAL, 12), []);
+  });
+
+  test('isTooGeneral judges the whole term, not its words', () => {
+    assert.equal(isTooGeneral('set'), true);
+    assert.equal(isTooGeneral('set difference'), false);
+    assert.equal(isTooGeneral('type'), true);
+    assert.equal(isTooGeneral('type checking'), false);
+  });
+
+  test('the prompt asks for subject specific terms as well as filtering', () => {
+    // A list only catches what someone thought of. Asking catches the rest.
+    assert.match(extractPrompt(GENERAL), /specific to this subject/);
   });
 });
 

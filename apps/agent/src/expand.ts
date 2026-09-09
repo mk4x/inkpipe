@@ -138,6 +138,13 @@ export function extractPrompt(notes: string, course?: string, limit = 12): strin
     'Do not list instructions, advice, or actions. "Remove redundancy" and',
     '"Avoid division" are not terms. "Kleene star" and "register allocation" are.',
     '',
+    // Page F also yielded "language", "set" and "nums", all genuinely on the
+    // page and all useless. The stop list catches the worst, but asking is
+    // cheaper than filtering and catches the ones no list anticipates.
+    'The term must be specific to this subject. Skip ordinary words that would',
+    'mean the same thing in any subject: "language" and "set" on their own are',
+    'too general, while "formal language" and "set difference" are not.',
+    '',
     // Also measured on page F: the page reads "Kleeny star", and copying that
     // verbatim would search for a word that does not exist. Handwriting is
     // misread and students misspell things, so a bounded correction is allowed.
@@ -208,6 +215,38 @@ function normalise(text: string): string {
 }
 
 /**
+ * Single words too general to be worth explaining on their own.
+ *
+ * Measured on corpus page F, which yielded "language", "set" and "nums". All
+ * three are genuinely written on the page, so the on-page guard passes them,
+ * and all three are useless: no source defines the bare word "language", and an
+ * explanation of what a "set" is belongs in nobody's revision notes.
+ *
+ * This is a judgement encoded as data, which is why it is a short list of
+ * SINGLE words only. "Formal language" and "set difference" are real terms and
+ * are unaffected, because the rule below applies only when the whole term is
+ * one of these words. Erring small is deliberate: a wrongly dropped term is
+ * invisible, whereas the cost of a wrongly kept one is a few seconds and a line
+ * of noise in the note.
+ */
+const TOO_GENERAL = new Set([
+  'language', 'languages', 'set', 'sets', 'number', 'numbers', 'nums', 'value',
+  'values', 'type', 'types', 'example', 'examples', 'note', 'notes', 'thing',
+  'things', 'data', 'system', 'code', 'file', 'files', 'list', 'lists', 'name',
+  'names', 'word', 'words', 'string', 'strings', 'part', 'parts', 'problem',
+  'problems', 'result', 'results', 'method', 'methods', 'case', 'cases',
+  'point', 'points', 'line', 'lines', 'time', 'size', 'form', 'level',
+]);
+
+/** Whether a term is a bare general word rather than the name of a concept. */
+export function isTooGeneral(term: string): boolean {
+  const key = normalise(term).replace(/[^a-z0-9 ]/g, '');
+  // Only single words. A multi-word term containing a general word is fine:
+  // "formal language" and "context free language" are exactly what we want.
+  return !key.includes(' ') && TOO_GENERAL.has(key);
+}
+
+/**
  * Parse a term list and keep only terms actually present on the page.
  *
  * Pure and exported so the filtering rules can be tested without a model.
@@ -228,6 +267,7 @@ export function parseTerms(raw: string, notes: string, limit: number): string[] 
 
     const key = normalise(term);
     if (seen.has(key)) continue;
+    if (isTooGeneral(term)) continue;
     // The guard that matters: it has to be on the page, give or take a
     // corrected spelling.
     if (!appearsOnPage(key, haystack)) continue;

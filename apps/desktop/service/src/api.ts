@@ -8,7 +8,7 @@
 // never sees it, which is what preserves the property decision 16 wanted.
 
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from 'fastify';
-import { randomUUID, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { InkpipeClient, ApiError } from '@inkpipe/client';
 import { toBase64Url } from '@inkpipe/crypto';
 import { collectDrafts, renderNote, type Draft } from '../../../agent/src/pipeline.ts';
@@ -16,6 +16,8 @@ import { ollamaModel, ollamaTextModel } from '../../../agent/src/transcribe.ts';
 import type { ExpansionOptions } from '../../../agent/src/pipeline.ts';
 import { setSearchApiKey, hasSearchApiKey } from './secrets.ts';
 import { buildResearch, researchBlocker } from './research.ts';
+import { recordFor, corpusCandidates } from '../../../agent/src/feedback.ts';
+import { appendFeedback, loadFeedback } from './feedbackStore.ts';
 import { writeNote, push as pushVault, isDirty, isGitRepo, VaultError } from '../../../agent/src/vault.ts';
 import {
   loadConfig, saveConfig, configExists, glossaryFor, addGlossaryTerms,
@@ -37,6 +39,7 @@ export interface ServiceOptions {
   configPath?: string;
   keystorePath?: string;
   secretsPath?: string;
+  feedbackPath?: string;
   researchPath?: string;
   /** Injected in tests so no real model is needed. */
   modelFactory?: (config: ConfigType) => (prompt: string, image: Uint8Array) => Promise<string>;
@@ -526,6 +529,32 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
     })),
   }));
 
+  // --- feedback ----------------------------------------------------------
+  /**
+   * Which pages the golden corpus should grow by, worst first.
+   *
+   * Issue #8 notes the corpus is too small to tune a prompt against and that
+   * the degeneracy thresholds are tuned in sample. This turns real use into the
+   * shortlist, rather than the corpus being whichever pages happened to get
+   * photographed first.
+   */
+  app.get('/api/feedback/candidates', async () => {
+    const records = loadFeedback(options.feedbackPath);
+    const candidates = corpusCandidates(records);
+    return {
+      total: records.length,
+      candidates: candidates.map((r) => ({
+        imageHash: r.imageHash,
+        sessionId: r.sessionId,
+        seq: r.seq,
+        course: r.course,
+        verdict: r.verdict,
+        corrections: r.corrections,
+        at: r.at,
+      })),
+    };
+  });
+
   // --- approve -----------------------------------------------------------
   app.post<{ Params: { sessionId: string } }>('/api/drafts/:sessionId/approve', async (request, reply) => {
     const draft = drafts.find((d) => d.sessionId === request.params.sessionId);
@@ -572,9 +601,38 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
       await clientFor(config, keys).post('/blobs/ack', { blobIds: draft.blobIds });
       drafts = drafts.filter((d) => d.sessionId !== draft.sessionId);
 
-      // Corrections feed the glossary (PREPARATION section 9).
-      if (body.data.glossaryTerms && body.data.glossaryTerms.length > 0) {
-        saveConfig(addGlossaryTerms(config, edited.course, body.data.glossaryTerms), options.configPath);
+      // Corrections feed the glossary (PREPARATION section 9, issue #8).
+      //
+      // Derived from the edit rather than typed. The preview already has the
+      // model's transcript and the user's version, so asking them to also fill
+      // in a glossary field is asking for work the diff can do, and a feedback
+      // mechanism that needs extra effort gets used twice and then abandoned.
+      // Anything explicitly supplied is merged on top.
+      const derived: string[] = [];
+      for (const page of draft.pages) {
+        const override = body.data.pages?.find((p) => p.blobId === page.blobId);
+        if (!override) continue;
+
+        const verdict = override.verdict ?? 'good';
+        const record = recordFor({
+          // The vault image, not the original: the original is already gone
+          // from memory by now, and this only has to identify the page again.
+          imageHash: createHash('sha256').update(page.vaultImage).digest('hex'),
+          sessionId: draft.sessionId,
+          seq: page.seq,
+          course: edited.course,
+          verdict,
+          original: page.markdown,
+          edited: override.markdown,
+        });
+
+        appendFeedback(record, options.feedbackPath);
+        derived.push(...record.corrections);
+      }
+
+      const glossaryTerms = [...derived, ...(body.data.glossaryTerms ?? [])];
+      if (glossaryTerms.length > 0) {
+        saveConfig(addGlossaryTerms(config, edited.course, glossaryTerms), options.configPath);
       }
 
       return reply.send({
@@ -697,7 +755,12 @@ const z_ApproveRequest = z.object({
   pages: z.array(z.object({
     blobId: z.string().uuid(),
     markdown: z.string(),
+    /** Issue #8: thumbs up or down on the page. Defaults to good, so a client
+     *  that does not ask still works and simply never flags a corpus
+     *  candidate on verdict alone. */
+    verdict: z.enum(['good', 'bad']).optional(),
   })).optional(),
-  /** Terms the user corrected, folded into the course glossary. */
+  /** Terms the user corrected. Merged on top of the ones derived from the
+   *  edit, for a client that wants to add vocabulary the diff cannot see. */
   glossaryTerms: z.array(z.string().min(1).max(64)).optional(),
 });
