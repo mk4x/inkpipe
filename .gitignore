@@ -51,3 +51,6 @@ research.json
 # swept it into a public commit.
 *.txt
 !requirements*.txt
+
+# Installer output and staging.
+build/

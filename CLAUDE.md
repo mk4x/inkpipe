@@ -10,9 +10,10 @@ Working end to end. Phone captures, the VPS relays ciphertext, the desktop
 transcribes locally and builds a draft, and the preview writes to the vault.
 `docs/SPEC.md` and `docs/SETUP.md` exist and are kept in step by CI.
 
-Four ADRs are accepted. ADR 0004 is the only one taken without a spike behind
-it, and its `research` feature is off by default until a side by side run on the
-corpus shows it does not cause regressions.
+Five ADRs are accepted. A Windows installer is built by `npm run installer`.
+ADR 0004 was the only one taken without a spike behind it; it has since been
+measured at zero regressions over twelve terms. Its `research` feature still
+defaults to off, because it needs a search instance that nobody has by default.
 
 ## Hard rules
 
@@ -117,9 +118,10 @@ code.
 Seven layers, described in `docs/PREPARATION.md` section 10. The two that are
 easy to skip and must not be:
 
-- **Cross-language crypto vectors.** The phone encrypts in TypeScript, the
-  desktop decrypts in Rust. Two implementations means they can diverge. CI
-  asserts TS encrypt to Rust decrypt byte-for-byte.
+- **Cross-surface crypto vectors.** The phone encrypts and the desktop decrypts,
+  and the phone runs without Node built-ins. CI asserts a fixed vector opens
+  byte-for-byte, and `packages/crypto/test/portability.test.ts` asserts no
+  Node-only API (Buffer above all) reaches the phone bundle.
 - **The golden corpus.** A prompt change that lowers transcription accuracy must
   fail the build rather than silently degrade the notes.
 
@@ -130,7 +132,7 @@ before fixing it.
 
 ```
 apps/phone          Expo dev build, TypeScript
-apps/desktop        Node service plus React and TypeScript UI (ADR 0002)
+apps/desktop        Node service, React UI, launcher and installer (ADR 0002, 0005)
 apps/agent          transcription, formatting, sanitising, expansion, search
 apps/server         Fastify, SQLite, Node 24
 packages/protocol   zod wire schemas, shared by all three surfaces

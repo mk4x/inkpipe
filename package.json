@@ -21,7 +21,10 @@
     "ui:dev": "vite --config apps/desktop/ui/vite.config.ts",
     "ui:build": "vite build --config apps/desktop/ui/vite.config.ts",
     "desktop": "node apps/desktop/service/src/index.ts",
-    "typecheck": "tsc -p apps/desktop/ui/tsconfig.json"
+    "typecheck": "tsc -p apps/desktop/ui/tsconfig.json",
+    "desktop:window": "node apps/desktop/launcher/src/index.ts",
+    "stage": "npm run ui:build && node scripts/stage-app.mjs",
+    "installer": "node scripts/build-installer.mjs"
   },
   "dependencies": {
     "@fastify/static": "^10.1.3",

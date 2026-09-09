@@ -347,3 +347,42 @@ output, which means the model looped rather than read. The photograph is still
 in the note. Retry with a better-lit or straighter shot, and see ADR 0001 for
 what actually drives accuracy: rotation, single-column layout, and larger
 mathematical subscripts. Paper ruling is not a factor.
+
+## Installing
+
+Windows: run `inkpipe-setup-x.y.z.exe`. It installs per user, needs no
+administrator, and bundles its own Node runtime, so nothing is required
+beforehand. Shortcuts go to the Start Menu, optionally the desktop, and
+optionally your startup folder.
+
+It is not code signed, so SmartScreen will warn on first run. Choose "More info"
+then "Run anyway".
+
+The application opens in its own window, with no address bar and its own taskbar
+entry. That window is a chromeless Microsoft Edge, which is already on every
+Windows machine, running against a private browser profile so your notes are
+never in your ordinary browsing session and no extension can read them. See
+[adr/0005](adr/0005-a-window-without-a-new-runtime.md).
+
+Closing the window exits the application, service included.
+
+Ollama is not installed by the installer. It is detected, and the setup screen
+inside the app offers to install it, because that download is several gigabytes
+and belongs behind a progress bar you can cancel.
+
+To build the installer yourself:
+
+```bash
+npm run installer
+```
+
+That needs Inno Setup, which is a build dependency only:
+
+```bash
+winget install --id JRSoftware.InnoSetup
+```
+
+Uninstalling removes the application and the window profile. It deliberately
+leaves `config.json`, `keys.json` and `secrets.json` alone, because `keys.json`
+is derived from your recovery phrase and losing it makes any page still waiting
+on the server permanently unreadable.
