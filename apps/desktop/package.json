@@ -1,0 +1,10 @@
+{
+  "name": "@inkpipe/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "service/src/index.ts",
+  "scripts": {
+    "service": "node service/src/index.ts"
+  }
+}

@@ -17,13 +17,29 @@
     "check:emdash": "bash scripts/check-em-dashes.sh",
     "check:docs": "bash scripts/check-doc-drift.sh",
     "verify": "npm run check:emdash && npm run test",
-    "eval": "node packages/corpus/spike.mjs --model qwen2.5vl:7b --primed --prompt minimal"
+    "eval": "node packages/corpus/spike.mjs --model qwen2.5vl:7b --primed --prompt minimal",
+    "ui:dev": "vite --config apps/desktop/ui/vite.config.ts",
+    "ui:build": "vite build --config apps/desktop/ui/vite.config.ts",
+    "desktop": "node apps/desktop/service/src/index.ts",
+    "typecheck": "tsc -p apps/desktop/ui/tsconfig.json"
   },
   "dependencies": {
+    "@fastify/static": "^10.1.3",
     "@noble/ciphers": "^1.2.1",
     "@noble/curves": "^1.8.1",
     "@noble/hashes": "^1.7.1",
     "fastify": "^5.2.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3"
   }
 }

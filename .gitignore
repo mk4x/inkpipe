@@ -27,3 +27,6 @@ packages/corpus/recordings/
 inkpipe.config.json
 *.pem
 *.key
+
+# built UI (rebuilt by npm run ui:build)
+apps/desktop/ui/dist/

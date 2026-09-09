@@ -37,7 +37,7 @@ check_pair() {
 }
 
 check_pair '^packages/protocol/' 'docs/SPEC.md' 'the wire protocol'
-check_pair '^apps/agent/src/config' 'docs/SETUP.md' 'the config schema'
+check_pair '^apps/desktop/service/src/config' 'docs/SETUP.md' 'the config schema'
 
 if [ "$status" -eq 0 ]; then
   echo "OK: no documentation drift in $RANGE"
