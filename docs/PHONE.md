@@ -75,6 +75,17 @@ cd android && ./gradlew assembleDebug
 
 The APK lands in `android/app/build/outputs/apk/debug/`.
 
+A plain debug build bundles all four ABIs and comes out around 190 MB. For a
+phone, build one architecture:
+
+```bash
+./gradlew assembleDebug -PreactNativeArchitectures=arm64-v8a
+```
+
+That is roughly 62 MB. Almost every Android phone from the last several years is
+arm64-v8a. Install with `adb install -r <apk>`, or copy it across and open it,
+which needs "install unknown apps" enabled for whatever app you open it from.
+
 `android/` and `ios/` are gitignored. Expo regenerates them from `app.json`, so
 they are build output rather than source. Never edit them by hand: the next
 prebuild discards the changes.

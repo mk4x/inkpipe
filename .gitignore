@@ -35,3 +35,6 @@ apps/desktop/ui/dist/
 apps/phone/android/
 apps/phone/ios/
 apps/phone/.expo/
+
+# Built APKs, produced by apps/phone build
+dist/
