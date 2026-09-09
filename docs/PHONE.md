@@ -1,6 +1,6 @@
 # The phone app
 
-Expo, Android only. Three screens: pair, capture, queue.
+Expo SDK 57, Android only. Three screens: pair, capture, queue.
 
 ## What it does
 
@@ -94,16 +94,31 @@ prebuild discards the changes.
 
 Two things that are easy to get wrong here:
 
-**React versions.** The desktop UI uses React 19, Expo needs 18. npm nests
-18.3.1 under `apps/phone/node_modules` while 19 stays at the root, so both work
-without pinning either backwards. If Metro ever resolves the wrong one, check
-`nodeModulesPaths` in `metro.config.js`: the app's own directory must come
-first.
+**One Expo version, everywhere.** The phone is on **SDK 57**, which uses React
+19, the same major the desktop UI runs. That is deliberate: an earlier attempt
+put the phone on SDK 52 while the root had hoisted SDK 57, and the Android build
+resolves from the root, so it compiled SDK 57 native modules against an SDK 52
+app. The symptom was an opaque Gradle error:
 
-**Version skew.** `npx expo install --fix` is the fix for almost any Gradle
-configuration error. Expo SDK 52 wants exact versions of `react-native` and its
-own modules, and npm workspace hoisting can put a mismatched copy at the root
-where the Android build finds it.
+```
+Could not get unknown property 'release' for SoftwareComponent container
+  at expo-modules-core/android/ExpoModulesCorePlugin.gradle line 95
+```
+
+If you ever see that, it is version skew, not a Gradle problem. Check what
+`node_modules/expo` resolves to at the **repo root**, not in `apps/phone`.
+
+**A plain reinstall does not fix skew.** Stale hoisted copies survive
+`npm install`. Clear them first:
+
+```bash
+rm -rf node_modules apps/*/node_modules packages/*/node_modules package-lock.json
+npm install
+```
+
+**`npx expo install --fix` pins aggressively.** It wanted TypeScript 6, which
+would have dragged the whole repo forward as a side effect of a phone
+dependency. Check its edits to `apps/phone/package.json` before accepting them.
 
 ## Testing
 
