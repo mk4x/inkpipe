@@ -1,0 +1,62 @@
+{
+  "page": "page-e-compiler-construction",
+  "model": "qwen2.5:14b",
+  "terms": [
+    "IR",
+    "LLVM",
+    "AST",
+    "Lexical Analysis",
+    "Syntaxical Analysis",
+    "Semantical Analysis"
+  ],
+  "before": [
+    {
+      "term": "IR",
+      "text": "IR, or Intermediate Representation, is a language-independent format used in compilers to represent the source code during the optimization phase. It serves as a bridge between the front end, where the source code is parsed into an abstract syntax tree (AST), and the back end, where the optimized code is generated into the target language or machine code.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "LLVM",
+      "text": "LLVM is an intermediate representation and a related set of tools and libraries used for analyzing, optimizing, and generating machine code. It serves as a compiler infrastructure that can be used to build compilers for various source languages and target platforms.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "AST",
+      "text": "AST stands for Abstract Syntax Tree, which represents the structure of the source code in a tree format, where each node is a construct from the source code, such as expressions or statements, after syntax analysis. This tree is used for further processing like semantic analysis, optimization, and code generation.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "Lexical Analysis",
+      "text": "Lexical Analysis is the process of converting the source code into a sequence of tokens by identifying and categorizing the basic elements (such as keywords, identifiers, and operators) of the programming language.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "Syntaxical Analysis",
+      "text": "Syntaxical Analysis: This phase involves parsing the token stream to identify the structure of the source code according to the grammar rules of the source language, resulting in a parse tree or an abstract syntax tree (AST).",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "Semantical Analysis",
+      "text": "Semantical Analysis involves checking the meaning and validity of the source code based on the syntax structure, including type checking and ensuring that the code adheres to the rules and constraints of the programming language.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    }
+  ]
+}

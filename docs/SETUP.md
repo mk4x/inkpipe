@@ -226,8 +226,14 @@ consistency check had passed three times running. See
 
 `model` is a **text** model, separate from the vision one. They run
 sequentially, so a 9 GB text model and a 6 GB vision model coexist on a 16 GB
-card. `samples` controls the consistency signal only: raising it costs time
-linearly and detects wobble, never systematic error, so 3 is plenty.
+card. `samples` controls the consistency signal: raising it costs time linearly
+and detects wobble, never systematic error, so 3 is plenty.
+
+**Do not set `samples` to 1.** It does not just switch the consistency signal
+off. A term is refused only when every sample refuses, so at one sample a single
+unlucky roll throws away a term the model knows. Measured on corpus page E: one
+sample refused `AST` and `Lexical Analysis`, three samples refused nothing, and
+a direct probe found no refusal in fifteen rolls.
 
 Budget roughly 8 to 12 seconds per term. A page of 10 terms is about two
 minutes, which is why `maxTermsPerNote` exists.

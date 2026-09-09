@@ -87,8 +87,14 @@ export const Config = z.object({
     /** A TEXT model, separate from the vision one. They run sequentially, so
      *  both fit on one card. qwen2.5:14b was the measured choice. */
     model: z.string().min(1).default('qwen2.5:14b'),
-    /** Samples per term for the consistency signal. 1 disables it. More costs
-     *  time linearly and only detects wobble, never systematic error. */
+    /** Samples per term for the consistency signal. More costs time linearly
+     *  and only detects wobble, never systematic error.
+     *
+     *  Do not set this to 1. It does not merely disable the consistency
+     *  signal: a term is refused when EVERY sample refuses, so at one sample a
+     *  single unlucky roll discards a term the model knows perfectly well.
+     *  Measured on corpus page E, where one sample refused two of six terms and
+     *  three samples refused none. */
     samples: z.number().int().min(1).max(7).default(3),
     /** Below this agreement, an explanation is kept but marked uncertain. */
     agreementThreshold: z.number().min(0).max(1).default(0.5),
