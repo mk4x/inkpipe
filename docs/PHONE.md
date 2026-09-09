@@ -70,21 +70,39 @@ export ANDROID_HOME=~/tools/android-sdk
 cd apps/phone
 npx expo prebuild --platform android --clean
 echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-cd android && ./gradlew assembleDebug
+cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
 ```
 
-The APK lands in `android/app/build/outputs/apk/debug/`.
+The APK lands in `android/app/build/outputs/apk/release/`.
 
-A plain debug build bundles all four ABIs and comes out around 190 MB. For a
-phone, build one architecture:
+### Build RELEASE, not debug
 
-```bash
-./gradlew assembleDebug -PreactNativeArchitectures=arm64-v8a
+This matters more than it looks. **A debug APK does not contain the JavaScript
+bundle.** It expects Metro, the dev server, on `localhost:8081`, and without it
+the app installs and launches and then dies with:
+
+```
+Unable to load script.
+Make sure you're running Metro or that your bundle 'index.android.bundle'
+is packaged correctly for release.
 ```
 
-That is roughly 62 MB. Almost every Android phone from the last several years is
-arm64-v8a. Install with `adb install -r <apk>`, or copy it across and open it,
-which needs "install unknown apps" enabled for whatever app you open it from.
+It looks like a broken app. It is a correctly built debug app with nowhere to
+fetch its code from. A release build compiles the bundle into the APK, so it
+runs standalone with nothing else on the network.
+
+Use a debug build only alongside `npx expo start --dev-client` and
+`adb reverse tcp:8081 tcp:8081`.
+
+### Architecture
+
+`-PreactNativeArchitectures=arm64-v8a` matters too: without it the build bundles
+arm64-v8a, armeabi-v7a, x86 and x86_64 and comes out around 190 MB. One
+architecture is far smaller, and every Android phone of the last several years
+is arm64-v8a.
+
+Install with `adb install -r <apk>`, or copy it across and open it, which needs
+"install unknown apps" enabled for whatever app you open it from.
 
 `android/` and `ios/` are gitignored. Expo regenerates them from `app.json`, so
 they are build output rather than source. Never edit them by hand: the next

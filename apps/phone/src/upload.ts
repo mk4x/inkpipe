@@ -5,11 +5,11 @@
 // that is the point of a sealed box, and the reason the local copy in
 // app-private storage is the phone's only way back to the original.
 
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { InkpipeClient, ApiError } from '@inkpipe/client';
 import { seal, toBase64, fromBase64Url } from '@inkpipe/crypto';
 import { LIMITS } from '@inkpipe/protocol';
-import type { Capture, Pairing, StoredIdentity } from './store.ts';
+import { captureFile, type Capture, type Pairing, type StoredIdentity } from './store.ts';
 
 export interface UploadProgress {
   blobId: string;
@@ -56,10 +56,11 @@ export async function uploadPending(
     onProgress?.({ blobId: capture.blobId, seq: capture.seq, state: 'uploading' });
 
     try {
-      const base64 = await FileSystem.readAsStringAsync(capture.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const plaintext = new Uint8Array(Buffer.from(base64, 'base64'));
+      const file = captureFile(capture.fileName);
+      if (!file.exists) {
+        throw new Error('the photo file is missing. It may have been cleaned up.');
+      }
+      const plaintext = await file.bytes();
 
       // Check before spending time on crypto: the server enforces this too, but
       // failing here gives a clear message instead of a 413.

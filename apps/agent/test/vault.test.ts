@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   writeNote, push, isDirty, resolveInside, plannedPaths, VaultError, COMMIT_PREFIX,
+  classifyPushFailure,
   type VaultConfig,
 } from '../src/vault.ts';
 
@@ -209,6 +210,70 @@ describe('push', () => {
       assert.equal(existsSync(join(root, '.git', 'rebase-merge')), false);
     } finally {
       rmSync(other, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('push failure classification', () => {
+  test('a vault with no remote says so, rather than blaming a conflict', async () => {
+    // The bug this exists for: any push failure was reported as a diverged
+    // remote, so a vault with no remote at all told the user to resolve a
+    // merge conflict that did not exist.
+    const solo = mkdtempSync(join(tmpdir(), 'inkpipe-noremote-'));
+    try {
+      execFileSync('git', ['init', '-b', 'main', solo]);
+      git(solo, 'config', 'user.email', 't@e.com');
+      git(solo, 'config', 'user.name', 'T');
+      writeFileSync(join(solo, 'a.md'), 'x');
+      git(solo, 'add', '.');
+      git(solo, 'commit', '-m', 'one');
+
+      await assert.rejects(
+        () => push(solo),
+        (e: VaultError) => e.code === 'no_remote' && /no remote configured/.test(e.message),
+      );
+    } finally {
+      rmSync(solo, { recursive: true, force: true });
+    }
+  });
+
+  test('an unreachable remote is reported as offline, not as a conflict', async () => {
+    const solo = mkdtempSync(join(tmpdir(), 'inkpipe-offline-'));
+    try {
+      execFileSync('git', ['init', '-b', 'main', solo]);
+      git(solo, 'config', 'user.email', 't@e.com');
+      git(solo, 'config', 'user.name', 'T');
+      writeFileSync(join(solo, 'a.md'), 'x');
+      git(solo, 'add', '.');
+      git(solo, 'commit', '-m', 'one');
+      // A host that cannot resolve.
+      git(solo, 'remote', 'add', 'origin', 'https://no-such-host.invalid/x.git');
+
+      await assert.rejects(
+        () => push(solo),
+        (e: VaultError) => ['offline', 'auth_failed', 'no_remote'].includes(e.code),
+      );
+    } finally {
+      rmSync(solo, { recursive: true, force: true });
+    }
+  });
+
+  test('classifier maps real git messages to actionable causes', () => {
+    const cases: [string, string | null][] = [
+      ["fatal: 'origin' does not appear to be a git repository", 'no_remote'],
+      ['fatal: repository not found', 'no_remote'],
+      ['fatal: Could not read from remote repository. Permission denied (publickey)', 'auth_failed'],
+      ['remote: Support for password authentication was removed. Authentication failed', 'auth_failed'],
+      ['fatal: unable to access: Could not resolve host: github.com', 'offline'],
+      ['error: src refspec main does not match any', 'bad_branch'],
+      // The one case that SHOULD attempt a rebase.
+      ['! [rejected] main -> main (non-fast-forward)\nhint: Updates were rejected', null],
+      ['! [rejected] main -> main (fetch first)', null],
+    ];
+
+    for (const [message, expected] of cases) {
+      const result = classifyPushFailure(message);
+      assert.equal(result?.code ?? null, expected, `wrong classification for: ${message.slice(0, 50)}`);
     }
   });
 });

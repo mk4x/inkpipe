@@ -4,16 +4,17 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { randomUUID } from 'expo-crypto';
 
 import { InkpipeClient } from '@inkpipe/client';
 import { generateIdentityKeyPair, toBase64Url } from '@inkpipe/crypto';
+import { assertRandomAvailable } from './src/polyfill.ts';
 import { parsePairingQr } from './src/pairing.ts';
 import { uploadPending, type UploadProgress } from './src/upload.ts';
 import {
   loadPairing, savePairing, saveIdentity, loadIdentity, clearPairing,
-  readManifest, addCapture, updateCapture, capturesDir,
+  readManifest, addCapture, updateCapture, capturesDirectory, captureFile,
   type Pairing, type Capture,
 } from './src/store.ts';
 import { bytesUsed, shouldWarn, DEFAULT_RETENTION } from './src/retention.ts';
@@ -29,19 +30,45 @@ export default function App() {
     setCaptures(await readManifest());
   }, []);
 
+  const [bootError, setBootError] = useState<string | null>(null);
+
   useEffect(() => {
     void (async () => {
-      const existing = await loadPairing();
-      setPairing(existing);
-      await refresh();
-      setScreen(existing ? 'capture' : 'pair');
+      try {
+        // Fail here, loudly, rather than deep inside a key exchange.
+        assertRandomAvailable();
+        const existing = await loadPairing();
+        setPairing(existing);
+        await refresh();
+        setScreen(existing ? 'capture' : 'pair');
+      } catch (error) {
+        // Never swallow this. An unhandled rejection here leaves the app on its
+        // loading spinner forever, which looks identical to a hang and gives
+        // the user nothing to report. It cost hours once already: the whole
+        // failure was one renamed API in expo-file-system.
+        setBootError((error as Error).message ?? String(error));
+      }
     })();
   }, [refresh]);
+
+  if (bootError) {
+    return (
+      <View style={[styles.screen, styles.centre, styles.pad]}>
+        <Text style={styles.h1}>inkpipe could not start</Text>
+        <Text style={styles.bad}>{bootError}</Text>
+        <Text style={styles.muted}>
+          This is a bug, not something you did. The message above is what to report.
+        </Text>
+        <StatusBar style="light" />
+      </View>
+    );
+  }
 
   if (screen === 'loading') {
     return (
       <View style={[styles.screen, styles.centre]}>
         <ActivityIndicator color="#6ea8fe" />
+        <Text style={styles.muted}>starting...</Text>
         <StatusBar style="light" />
       </View>
     );
@@ -194,16 +221,16 @@ function CaptureScreen({ captures, onChanged, onOpenQueue }: {
       if (!photo?.uri) return;
 
       const blobId = randomUUID();
-      const target = `${capturesDir()}${blobId}.jpg`;
-      await FileSystem.moveAsync({ from: photo.uri, to: target });
-      const info = await FileSystem.getInfoAsync(target, { size: true });
+      const fileName = `${blobId}.jpg`;
+      const source = new File(photo.uri);
+      await source.move(new File(capturesDirectory(), fileName));
 
       const capture = {
         blobId,
         sessionId,
         seq: shots.length,
-        uri: target,
-        bytes: info.exists && 'size' in info ? info.size : 0,
+        fileName,
+        bytes: captureFile(fileName).size ?? 0,
         capturedAt: new Date().toISOString(),
       };
       await addCapture(capture);
@@ -237,11 +264,27 @@ function CaptureScreen({ captures, onChanged, onOpenQueue }: {
 
   return (
     <View style={styles.screen}>
-      <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" />
+      {/*
+        The preview is constrained to the SENSOR's aspect ratio (4:3 portrait),
+        not stretched to fill the screen.
 
-      {/* Framing guide. Getting the page square and upright is the single
-          biggest lever on transcription accuracy, per ADR 0001. */}
-      <View pointerEvents="none" style={styles.frameGuide} />
+        Filling looks nicer but lies: the preview gets cropped to the screen
+        shape while the photo is captured at the full sensor frame, so the saved
+        image contains more than you framed. You line the page up to the edges,
+        and the photo comes out zoomed out with the page floating in the middle.
+
+        Letterboxing means what you see is what is captured.
+      */}
+      <View style={styles.cameraFrame}>
+        <View style={styles.cameraAspect}>
+          <CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" ratio="4:3" />
+
+          {/* Framing guide, inside the aspect box so it marks the real capture
+              area. Getting the page square and upright is the single biggest
+              lever on transcription accuracy, per ADR 0001. */}
+          <View pointerEvents="none" style={styles.frameGuide} />
+        </View>
+      </View>
 
       <View style={styles.captureTop}>
         <Text style={styles.muted}>
@@ -355,7 +398,7 @@ function QueueScreen({ pairing, captures, onBack, onChanged, onUnpair }: {
       <ScrollView style={{ marginTop: 12 }}>
         {captures.slice().reverse().map((capture) => (
           <View key={capture.blobId} style={styles.queueRow}>
-            <Image source={{ uri: capture.uri }} style={styles.thumb} />
+            <Image source={{ uri: captureFile(capture.fileName).uri }} style={styles.thumb} />
             <View style={{ flex: 1 }}>
               <Text style={styles.queueTitle}>
                 Page {capture.seq + 1} - {(capture.bytes / 1048576).toFixed(1)} MB
@@ -410,8 +453,21 @@ const styles = StyleSheet.create({
     padding: 24, paddingBottom: 48, backgroundColor: 'rgba(20,22,26,0.85)',
   },
 
+  // 3:4 width:height is a 4:3 sensor held in portrait. Centred, so the black
+  // bars sit above and below rather than the image being cropped.
+  cameraFrame: {
+    position: 'absolute', top: 0, bottom: 0, left: 0, right: 0,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  // 3:4 width to height is a 4:3 sensor held in portrait. The black bars sit
+  // above and below, and nothing is cropped, so the preview equals the capture.
+  cameraAspect: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    overflow: 'hidden',
+  },
   frameGuide: {
-    position: 'absolute', top: '12%', left: '6%', right: '6%', bottom: '22%',
+    position: 'absolute', top: '4%', left: '4%', right: '4%', bottom: '4%',
     borderWidth: 2, borderColor: 'rgba(110,168,254,0.6)', borderRadius: 8,
   },
   captureTop: {

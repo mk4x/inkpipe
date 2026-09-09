@@ -10,23 +10,23 @@
 //                  the gallery should not fill with notebook pages, and
 //                  app-private storage is cleaned up on uninstall.
 //
-// The capture store is the backup that makes a lost desktop key survivable
-// (decision 17 covers the other half). It keeps originals for 90 days or 2 GB,
-// evicting oldest first.
+// Uses the CURRENT expo-file-system API (File, Directory, Paths). The older
+// `documentDirectory` / `getInfoAsync` / `readAsStringAsync` functions moved to
+// `expo-file-system/legacy` in SDK 54. Writing against them on SDK 57 made
+// every call throw, which surfaced as an app stuck on its loading spinner
+// forever, because the failure had nowhere to go. See the notes in App.tsx.
 
 import * as SecureStore from 'expo-secure-store';
-import * as FileSystem from 'expo-file-system';
+import { File, Directory, Paths } from 'expo-file-system';
 import { toBase64Url, fromBase64Url } from '@inkpipe/crypto';
+import { planPrune, DEFAULT_RETENTION, type CaptureState } from './retention.ts';
 
 const KEY_IDENTITY = 'inkpipe.identity';
 const KEY_PAIRING = 'inkpipe.pairing';
 
-/** Decision 15. */
-export const RETENTION_DAYS = 90;
-export const RETENTION_BYTES = 2 * 1024 * 1024 * 1024;
-
-const CAPTURES_DIR = `${FileSystem.documentDirectory}captures/`;
-const MANIFEST = `${CAPTURES_DIR}manifest.json`;
+export type { CaptureState };
+export const RETENTION_DAYS = DEFAULT_RETENTION.days;
+export const RETENTION_BYTES = DEFAULT_RETENTION.bytes;
 
 export interface Pairing {
   serverUrl: string;
@@ -41,8 +41,21 @@ export interface StoredIdentity {
   publicKey: Uint8Array;
 }
 
+export interface Capture {
+  blobId: string;
+  sessionId: string;
+  seq: number;
+  /** File name inside the captures directory, not a full uri: a uri can change
+   *  between installs, a name cannot. */
+  fileName: string;
+  bytes: number;
+  capturedAt: string;
+  state: CaptureState;
+  error?: string;
+}
+
 // ---------------------------------------------------------------------------
-// Identity
+// Identity and pairing
 // ---------------------------------------------------------------------------
 
 export async function saveIdentity(identity: StoredIdentity): Promise<void> {
@@ -62,10 +75,6 @@ export async function loadIdentity(): Promise<StoredIdentity | null> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Pairing
-// ---------------------------------------------------------------------------
-
 export async function savePairing(pairing: Pairing): Promise<void> {
   await SecureStore.setItemAsync(KEY_PAIRING, JSON.stringify(pairing));
 }
@@ -84,104 +93,68 @@ export async function clearPairing(): Promise<void> {
 // Captures
 // ---------------------------------------------------------------------------
 
-export type CaptureState = 'pending' | 'uploaded' | 'failed';
-
-export interface Capture {
-  blobId: string;
-  sessionId: string;
-  seq: number;
-  /** Path inside app-private storage. */
-  uri: string;
-  bytes: number;
-  capturedAt: string;
-  state: CaptureState;
-  /** Last upload error, shown in the queue screen rather than swallowed. */
-  error?: string;
+export function capturesDirectory(): Directory {
+  const dir = new Directory(Paths.document, 'captures');
+  if (!dir.exists) dir.create({ intermediates: true });
+  return dir;
 }
 
-async function ensureDir(): Promise<void> {
-  const info = await FileSystem.getInfoAsync(CAPTURES_DIR);
-  if (!info.exists) await FileSystem.makeDirectoryAsync(CAPTURES_DIR, { intermediates: true });
+export function captureFile(fileName: string): File {
+  return new File(capturesDirectory(), fileName);
+}
+
+function manifestFile(): File {
+  return new File(capturesDirectory(), 'manifest.json');
 }
 
 export async function readManifest(): Promise<Capture[]> {
-  await ensureDir();
-  const info = await FileSystem.getInfoAsync(MANIFEST);
-  if (!info.exists) return [];
+  const file = manifestFile();
+  if (!file.exists) return [];
   try {
-    return JSON.parse(await FileSystem.readAsStringAsync(MANIFEST)) as Capture[];
+    return JSON.parse(await file.text()) as Capture[];
   } catch {
-    // A corrupt manifest must not brick the app. The image files are still on
-    // disk and the user can re-shoot; losing the index is recoverable.
+    // A corrupt manifest must not brick the app. The images are still on disk
+    // and can be re-shot; losing the index is recoverable, a crash loop is not.
     return [];
   }
 }
 
 export async function writeManifest(captures: Capture[]): Promise<void> {
-  await ensureDir();
-  await FileSystem.writeAsStringAsync(MANIFEST, JSON.stringify(captures));
+  const file = manifestFile();
+  if (!file.exists) file.create();
+  file.write(JSON.stringify(captures));
 }
 
 export async function addCapture(capture: Omit<Capture, 'state'>): Promise<Capture[]> {
-  const captures = await readManifest();
-  const next = [...captures, { ...capture, state: 'pending' as const }];
+  const next = [...(await readManifest()), { ...capture, state: 'pending' as const }];
   await writeManifest(next);
   return next;
 }
 
-export async function updateCapture(
-  blobId: string,
-  patch: Partial<Capture>,
-): Promise<Capture[]> {
-  const captures = await readManifest();
-  const next = captures.map((c) => (c.blobId === blobId ? { ...c, ...patch } : c));
+export async function updateCapture(blobId: string, patch: Partial<Capture>): Promise<Capture[]> {
+  const next = (await readManifest()).map((c) => (c.blobId === blobId ? { ...c, ...patch } : c));
   await writeManifest(next);
   return next;
 }
 
 /**
- * Evict old captures. Decision 15: 90 days or 2 GB, oldest first.
+ * Evict old captures per decision 15.
  *
- * Only ever removes captures that have been uploaded. A pending capture is one
- * the desktop has never seen, so deleting it would silently lose a page.
+ * The policy itself lives in retention.ts and is unit tested. This only applies
+ * the plan, so the rule that a pending capture is never deleted is enforced in
+ * code that runs under `node --test` rather than only on a device.
  */
 export async function pruneCaptures(now = new Date()): Promise<{ removed: number; freed: number }> {
   const captures = await readManifest();
-  const cutoff = now.getTime() - RETENTION_DAYS * 86_400_000;
-
-  const keep: Capture[] = [];
-  const remove: Capture[] = [];
-
-  for (const capture of captures) {
-    const tooOld = Date.parse(capture.capturedAt) < cutoff;
-    if (tooOld && capture.state === 'uploaded') remove.push(capture);
-    else keep.push(capture);
-  }
-
-  // Then trim by size, newest first, still never dropping a pending capture.
-  keep.sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
-  let total = 0;
-  const survivors: Capture[] = [];
-  for (const capture of keep) {
-    if (total + capture.bytes > RETENTION_BYTES && capture.state === 'uploaded') {
-      remove.push(capture);
-      continue;
-    }
-    total += capture.bytes;
-    survivors.push(capture);
-  }
+  const { keep, remove } = planPrune(captures, now);
 
   let freed = 0;
   for (const capture of remove) {
     freed += capture.bytes;
-    await FileSystem.deleteAsync(capture.uri, { idempotent: true });
+    const file = captureFile(capture.fileName);
+    if (file.exists) file.delete();
   }
 
-  survivors.sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
-  await writeManifest(survivors);
+  await writeManifest(keep);
   return { removed: remove.length, freed };
-}
-
-export function capturesDir(): string {
-  return CAPTURES_DIR;
 }

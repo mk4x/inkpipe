@@ -139,10 +139,21 @@ describe('normaliseRecoveryPhrase', () => {
     }
   });
 
-  test('does not accept a phrase with a genuinely different word', () => {
+  test('does not accept a word that is not in the wordlist', () => {
     const words = generateRecoveryPhrase().split(' ');
-    words[5] = words[5] === 'abandon' ? 'ability' : 'abandon';
+    words[5] = 'zzzz';
     assert.equal(isValidRecoveryPhrase(words.join(' ')), false);
+  });
+
+  test('does not accept a valid wordlist phrase with a bad checksum', () => {
+    // Fixed vectors, not a randomly mutated phrase. Swapping one word in a
+    // generated mnemonic leaves roughly a 1 in 256 chance the checksum still
+    // passes, which made an earlier version of this test flaky.
+    const canonical = `${'abandon '.repeat(23)}art`;   // all-zero entropy, valid
+    const corrupted = `${'abandon '.repeat(23)}abandon`; // same words, bad checksum
+
+    assert.equal(isValidRecoveryPhrase(canonical), true, 'the known-good vector must pass');
+    assert.equal(isValidRecoveryPhrase(corrupted), false, 'the known-bad checksum must fail');
   });
 });
 

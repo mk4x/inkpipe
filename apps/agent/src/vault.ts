@@ -170,8 +170,14 @@ export async function push(root: string, remote = 'origin', branch = 'main'): Pr
   try {
     await git(root, ['push', remote, branch]);
     return 'pushed';
-  } catch {
-    // Most likely the remote moved, which obsidian-git does routinely.
+  } catch (pushError) {
+    // Classify before reacting. An earlier version assumed every push failure
+    // was a diverged remote, so a vault with no remote at all reported a rebase
+    // conflict, which sent the user looking for a merge that did not exist.
+    const reason = classifyPushFailure((pushError as Error).message);
+    if (reason) throw reason;
+
+    // Remote moved. Common, because obsidian-git pushes from elsewhere.
     try {
       await git(root, ['pull', '--rebase', remote, branch]);
     } catch (rebaseError) {
@@ -186,4 +192,50 @@ export async function push(root: string, remote = 'origin', branch = 'main'): Pr
     await git(root, ['push', remote, branch]);
     return 'rebased-and-pushed';
   }
+}
+
+/**
+ * Turn git's stderr into a cause the user can act on.
+ *
+ * Returns null when the failure really does look like a diverged remote, which
+ * is the only case worth attempting a rebase for. Everything else gets a
+ * specific message, because "resolve the conflict" is useless advice when there
+ * is no conflict.
+ */
+export function classifyPushFailure(message: string): VaultError | null {
+  const text = message.toLowerCase();
+
+  if (/does not appear to be a git repository|repository not found|no such remote|no configured push destination/.test(text)) {
+    return new VaultError(
+      'no_remote',
+      'this vault has no remote configured, so there is nowhere to push. ' +
+      'Add one with "git remote add origin <url>", or turn off pushing in settings.',
+    );
+  }
+
+  if (/could not read from remote|permission denied|authentication failed|access rights|publickey/.test(text)) {
+    return new VaultError(
+      'auth_failed',
+      'git could not authenticate with the remote. Check your credentials or SSH key, ' +
+      'then try pushing from a terminal once to confirm it works.',
+    );
+  }
+
+  if (/could not resolve host|network is unreachable|connection timed out|failed to connect/.test(text)) {
+    return new VaultError(
+      'offline',
+      'could not reach the remote. Your note is committed locally and safe, ' +
+      'so pushing again when you are back online is all that is needed.',
+    );
+  }
+
+  if (/src refspec .* does not match any|matches more than one/.test(text)) {
+    return new VaultError(
+      'bad_branch',
+      'the configured branch does not exist in this vault. Check the branch name in settings.',
+    );
+  }
+
+  // Rejected, non-fast-forward, fetch first: a genuinely diverged remote.
+  return null;
 }

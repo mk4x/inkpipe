@@ -78,6 +78,24 @@ export const Config = z.object({
     whitespace: z.boolean().default(true),
   }).default({}),
 
+  // --- expansion (ADR 0003) ---
+  /** Turning terse keywords back into prose, with a contradiction gate.
+   *  Off by default: verbatim transcription is the safe baseline, and a page
+   *  you only want transcribed should never be embellished. */
+  expansion: z.object({
+    enabled: z.boolean().default(false),
+    /** A TEXT model, separate from the vision one. They run sequentially, so
+     *  both fit on one card. qwen2.5:14b was the measured choice. */
+    model: z.string().min(1).default('qwen2.5:14b'),
+    /** Samples per term for the consistency signal. 1 disables it. More costs
+     *  time linearly and only detects wobble, never systematic error. */
+    samples: z.number().int().min(1).max(7).default(3),
+    /** Below this agreement, an explanation is kept but marked uncertain. */
+    agreementThreshold: z.number().min(0).max(1).default(0.5),
+    /** Cap per note, so one dense page cannot run for an hour. */
+    maxTermsPerNote: z.number().int().min(1).max(50).default(12),
+  }).default({}),
+
   // --- behaviour ---
   /** Decision 13: 60 second default, configurable. */
   pollSeconds: z.number().int().min(10).max(3600).default(60),

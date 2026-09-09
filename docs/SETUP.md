@@ -130,6 +130,14 @@ account was created instead.
     "whitespace": true
   },
 
+  "expansion": {
+    "enabled": false,
+    "model": "qwen2.5:14b",
+    "samples": 3,
+    "agreementThreshold": 0.5,
+    "maxTermsPerNote": 12
+  },
+
   "pollSeconds": 60,
   "verbosity": "cleaned",
   "cloudEscalationEnabled": false
@@ -187,6 +195,38 @@ meanings and a slider does not.
 Anything the model adds that is not on the page is marked with a callout in the
 note. That is decision 20 and it is not configurable: with study notes you must
 always be able to tell what you wrote from what a machine inferred.
+
+**`expansion`** turns terse keywords back into prose. Off by default.
+
+Handwritten notes are keywords, and "IR: LLVM language" means little a month
+later. The obvious implementation asks a model to explain it, and the obvious
+implementation is dangerous: a small model produces fluent, plausible,
+occasionally wrong text, and wrong text in study notes is worse than no text.
+
+So every explanation passes a gate: **does it contradict the page it came
+from?** That check scored 8/8 on hand-labelled claims, catching an error that a
+consistency check had passed three times running. See
+[adr/0003](adr/0003-expansion-is-gated-by-contradiction.md) for the measurements.
+
+| outcome | what happens |
+|---|---|
+| **contradicted** | discarded, and listed as not explained |
+| **refused** | the model said it does not know the term. Listed, not hidden |
+| **low** | kept, marked *(uncertain)*: the model wavered across samples |
+| **high** | kept, marked as model-added per decision 20 |
+
+`model` is a **text** model, separate from the vision one. They run
+sequentially, so a 9 GB text model and a 6 GB vision model coexist on a 16 GB
+card. `samples` controls the consistency signal only: raising it costs time
+linearly and detects wobble, never systematic error, so 3 is plenty.
+
+Budget roughly 8 to 12 seconds per term. A page of 10 terms is about two
+minutes, which is why `maxTermsPerNote` exists.
+
+One limit worth knowing: the check compares an explanation against the
+transcript. If the transcript itself is wrong, an explanation that agrees with
+it passes. The preview editor is the last line of defence, which is a third
+independent reason it is a full editor rather than approve-or-reject.
 
 **`cloudEscalationEnabled`** defaults to `false` and stays opt-in. Even when
 enabled, each escalation is confirmed per note, so nothing spends money without

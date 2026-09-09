@@ -21,6 +21,7 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha';
 import { sha256 } from '@noble/hashes/sha256';
 import { hkdf } from '@noble/hashes/hkdf';
 import { randomBytes } from '@noble/hashes/utils';
+import { base64, base64urlnopad, hex } from '@scure/base';
 
 export const NONCE_BYTES = 24;
 export const KEY_BYTES = 32;
@@ -35,24 +36,30 @@ const HKDF_INFO = new TextEncoder().encode('inkpipe/v1/sealed-box');
 // sometimes in URLs and QR codes.
 // ---------------------------------------------------------------------------
 
+// @scure/base rather than Buffer. Buffer is a Node global that React Native
+// does not have, so using it here made this package Node-only and the phone
+// died with "Property 'Buffer' doesn't exist" the moment it tried to pair.
+// These functions run on the server, the desktop and the phone, so they must
+// depend on nothing platform specific.
+
 export function toBase64Url(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64url');
+  return base64urlnopad.encode(bytes);
 }
 
 export function fromBase64Url(text: string): Uint8Array {
-  return new Uint8Array(Buffer.from(text, 'base64url'));
+  return base64urlnopad.decode(text);
 }
 
 export function toBase64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64');
+  return base64.encode(bytes);
 }
 
 export function fromBase64(text: string): Uint8Array {
-  return new Uint8Array(Buffer.from(text, 'base64'));
+  return base64.decode(text);
 }
 
 export function sha256Hex(bytes: Uint8Array): string {
-  return Buffer.from(sha256(bytes)).toString('hex');
+  return hex.encode(sha256(bytes));
 }
 
 // ---------------------------------------------------------------------------
