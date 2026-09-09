@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
+import Fastify from 'fastify';
 import { createServer } from '../../server/src/server.ts';
 import { createService } from '../service/src/api.ts';
 import { loadConfig, glossaryFor } from '../service/src/config.ts';
@@ -331,5 +332,155 @@ describe('pairing', () => {
   test('pairing before setup is refused', async () => {
     const result = await ui<{ error: string }>('POST', '/api/pairing');
     assert.equal(result.status, 409);
+  });
+});
+
+describe('recovery (issue #4)', () => {
+  test('setup returns a 24 word recovery phrase, shown once', async () => {
+    const created = await ui<{ deviceId: string; recoveryPhrase: string }>(
+      'POST', '/api/setup', setupBody(),
+    );
+    assert.equal(created.status, 201);
+    assert.equal(created.body.recoveryPhrase.split(' ').length, 24);
+  });
+
+  test('the phrase is never written to disk', async () => {
+    // A copy of the phrase sitting next to the keys it protects is not a
+    // backup, it is a second copy of the key.
+    const created = await ui<{ recoveryPhrase: string }>('POST', '/api/setup', setupBody());
+    const firstWord = created.body.recoveryPhrase.split(' ')[0];
+
+    for (const file of [configPath, keystorePath]) {
+      const contents = readFileSync(file, 'utf8');
+      assert.ok(!contents.includes(created.body.recoveryPhrase), `the phrase leaked into ${file}`);
+      assert.ok(
+        !new RegExp(`\b${firstWord}\b`).test(contents),
+        `a phrase word leaked into ${file}`,
+      );
+    }
+  });
+
+  test('restoring on a fresh machine recovers the same device', async () => {
+    // Set up, capture the phrase, then wipe the machine and restore.
+    const created = await ui<{ deviceId: string; recoveryPhrase: string }>(
+      'POST', '/api/setup', setupBody(),
+    );
+    const phrase = created.body.recoveryPhrase;
+    const originalDeviceId = created.body.deviceId;
+
+    await service.app.close();
+    rmSync(configPath, { force: true });
+    rmSync(keystorePath, { force: true });
+
+    service = createService({
+      configPath, keystorePath,
+      modelFactory: () => async () => '# Restored\n',
+    });
+    uiToken = service.token;
+    await service.app.listen({ port: 0, host: '127.0.0.1' });
+    const addr = service.app.server.address();
+    serviceUrl = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+
+    const restored = await ui<{ deviceId: string; restored: boolean }>('POST', '/api/restore', {
+      ...setupBody(), recoveryPhrase: phrase,
+    });
+
+    assert.equal(restored.status, 201);
+    assert.equal(restored.body.restored, true, 'the server must recognise this identity');
+    assert.equal(restored.body.deviceId, originalDeviceId, 'the device id must be the same one');
+  });
+
+  test('a mistyped phrase is refused before anything is written', async () => {
+    const result = await ui<{ error: string }>('POST', '/api/restore', {
+      ...setupBody(),
+      recoveryPhrase: 'abandon '.repeat(23) + 'abandon',
+    });
+    assert.equal(result.status, 400);
+    assert.equal(result.body.error, 'bad_phrase');
+    assert.equal(existsSync(keystorePath), false, 'must not create keys from a bad phrase');
+  });
+
+  test('restore is refused when the machine is already set up', async () => {
+    const created = await ui<{ recoveryPhrase: string }>('POST', '/api/setup', setupBody());
+    const result = await ui<{ error: string }>('POST', '/api/restore', {
+      ...setupBody(), recoveryPhrase: created.body.recoveryPhrase,
+    });
+    assert.equal(result.status, 409);
+  });
+});
+
+describe('ollama (issue #7)', () => {
+  test('reports status without needing configuration first', async () => {
+    // The wizard asks about Ollama before setup completes, so this must work
+    // on a machine with no config at all.
+    const status = await ui<{
+      host: string; running: boolean; installed: boolean;
+      install: { command: string } | null; recommended: unknown[];
+    }>('GET', '/api/ollama/status');
+
+    assert.equal(status.status, 200);
+    assert.equal(typeof status.body.running, 'boolean');
+    assert.equal(typeof status.body.installed, 'boolean');
+    assert.ok(Array.isArray(status.body.recommended));
+    assert.ok(status.body.recommended.length > 0, 'must suggest at least one measured model');
+  });
+
+  test('offers an install command when the binary is missing', async () => {
+    const status = await ui<{ installed: boolean; install: { command: string; note: string } | null }>(
+      'GET', '/api/ollama/status',
+    );
+    if (!status.body.installed) {
+      assert.ok(status.body.install, 'must tell the user how to install it');
+      assert.ok(status.body.install!.command.length > 0);
+    } else {
+      assert.equal(status.body.install, null, 'no install prompt when it is already there');
+    }
+  });
+
+  test('pull reports idle before anything starts', async () => {
+    const pull = await ui<{ idle: boolean }>('GET', '/api/ollama/pull');
+    assert.equal(pull.body.idle, true);
+  });
+
+  test('rejects a malformed pull request', async () => {
+    const result = await ui<{ error: string }>('POST', '/api/ollama/pull', { model: '' });
+    assert.equal(result.status, 400);
+  });
+
+  test('rejects a probe with an out of range context', async () => {
+    const result = await ui<{ error: string }>('POST', '/api/ollama/probe', {
+      model: 'qwen2.5vl:7b', numCtx: 100,
+    });
+    assert.equal(result.status, 400);
+  });
+});
+
+describe('ollama detection', () => {
+  test('a reachable server counts as installed even when the binary is not on PATH', async () => {
+    // Ollama installs to a per-user directory that a background service often
+    // does not have on its PATH. Treating that as "not installed" told a user
+    // with a working Ollama to go and install the copy they already had.
+    const { detect } = await import('../service/src/ollama.ts');
+
+    const server = Fastify({ logger: false });
+    server.get('/api/tags', async () => ({ models: [] }));
+    await server.listen({ port: 0, host: '127.0.0.1' });
+    const addr = server.server.address();
+    const host = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+
+    try {
+      const detection = await detect(host);
+      assert.equal(detection.running, true);
+      assert.equal(detection.installed, true, 'a reachable server is proof of installation');
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('nothing reachable and nothing on PATH reports not installed', async () => {
+    const { detect } = await import('../service/src/ollama.ts');
+    // Port 1 is reserved and never listening.
+    const detection = await detect('http://127.0.0.1:1');
+    assert.equal(detection.running, false);
   });
 });

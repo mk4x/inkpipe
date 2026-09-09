@@ -108,3 +108,58 @@ small { color: var(--muted); font-size: 12px; }
   padding: 22px; text-align: center; display: grid; gap: 12px; justify-items: center;
 }
 .card img { border-radius: 8px; background: #fff; padding: 10px; }
+
+/* --- wizard --- */
+.steps { display: flex; gap: 6px; margin: 14px 0 4px; }
+.stepdot {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.stepdot.on { border-color: var(--accent); color: var(--accent); }
+
+.wizard-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+
+.choices { display: grid; gap: 10px; margin-top: 18px; }
+.choice {
+  display: grid; gap: 4px; text-align: left; padding: 16px;
+  border-radius: 9px; line-height: 1.4;
+}
+.choice strong { font-size: 15px; }
+
+.notice {
+  border: 1px solid var(--line); border-left: 3px solid var(--warn);
+  border-radius: 8px; padding: 14px; display: grid; gap: 10px;
+}
+.cmd {
+  background: #0d0f13; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; margin: 0; overflow-x: auto;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 13px;
+  color: var(--accent);
+}
+
+.chip {
+  display: inline-block; padding: 3px 9px; margin: 4px 6px 0 0;
+  border-radius: 999px; font-size: 12px;
+}
+
+/* The recovery phrase. Deliberately large and legible: people copy this onto
+   paper, and a transcription slip costs them every pending page. */
+.phrase {
+  display: grid; gap: 8px; margin: 14px 0;
+  background: #0d0f13; border: 1px solid var(--line); border-radius: 9px; padding: 16px;
+}
+.phrase-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.phrase-word {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 14px; letter-spacing: 0.3px;
+}
+.phrase-word em {
+  color: var(--muted); font-style: normal; font-size: 11px;
+  display: inline-block; width: 20px;
+}
+
+.check { display: flex; flex-direction: row; align-items: flex-start; gap: 9px; margin-top: 12px; }
+.check input { width: 16px; height: 16px; margin-top: 2px; }
+
+.qr { border-radius: 8px; background: #fff; padding: 10px; }

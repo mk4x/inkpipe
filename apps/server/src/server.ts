@@ -152,6 +152,28 @@ export function createServer(options: ServerOptions): FastifyInstance {
       return reply.code(401).send({ error: 'unauthenticated', message: 'bad join token' });
     }
 
+    // Recovery (issue #4). A desktop restored from its phrase derives the same
+    // identity key, so it must find the device it already owns rather than
+    // create a second account that cannot see its own pending pages.
+    const existing = store.getDeviceByIdentityKey(parsed.data.ed25519PublicKey);
+    if (existing) {
+      if (existing.x25519PublicKey !== parsed.data.x25519PublicKey) {
+        // Same identity, different content key. Accepting it would orphan every
+        // blob already sealed to the old one, so refuse rather than guess.
+        return reply.code(409).send({
+          error: 'content_key_mismatch',
+          message:
+            'this device is already registered with a different content key. ' +
+            'Accepting a new one would make every page still waiting on the server unreadable.',
+        });
+      }
+      return reply.code(200).send({
+        accountId: existing.accountId,
+        deviceId: existing.id,
+        restored: true,
+      });
+    }
+
     const timestamp = now().toISOString();
     const accountId = randomUUID();
     const deviceId = randomUUID();
@@ -166,7 +188,7 @@ export function createServer(options: ServerOptions): FastifyInstance {
       label: parsed.data.label,
     }, timestamp);
 
-    return reply.code(201).send({ accountId, deviceId });
+    return reply.code(201).send({ accountId, deviceId, restored: false });
   });
 
   app.post('/pair/create', { preHandler: requireAuth('pc') }, async (request, reply) => {

@@ -13,9 +13,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
-import {
-  generateIdentityKeyPair, generateContentKeyPair, toBase64Url, fromBase64Url,
-} from '@inkpipe/crypto';
+import { toBase64Url, fromBase64Url } from '@inkpipe/crypto';
+import { generateRecoveryPhrase, keysFromRecoveryPhrase } from '@inkpipe/crypto/recovery';
 import { defaultConfigPath } from './config.ts';
 
 const StoredKeys = z.object({
@@ -39,9 +38,15 @@ export function keystoreExists(path = defaultKeystorePath()): boolean {
   return existsSync(path);
 }
 
-/** Generate both keypairs and persist them. Refuses to overwrite: silently
- *  replacing the content key would orphan every blob on the server. */
-export function createKeys(path = defaultKeystorePath()): DeviceKeys {
+/**
+ * Create keys from a fresh recovery phrase.
+ *
+ * Returns the phrase so the wizard can show it exactly once. **It is never
+ * written to disk.** Storing it would defeat the purpose: the phrase exists so
+ * that a machine with nothing on it can still recover, and a copy sitting next
+ * to the keys it protects is not a backup, it is a second copy of the key.
+ */
+export function createKeys(path = defaultKeystorePath()): DeviceKeys & { recoveryPhrase: string } {
   if (existsSync(path)) {
     throw new Error(
       `refusing to overwrite existing keys at ${path}. ` +
@@ -49,9 +54,36 @@ export function createKeys(path = defaultKeystorePath()): DeviceKeys {
     );
   }
 
-  const identity = generateIdentityKeyPair();
-  const content = generateContentKeyPair();
+  const recoveryPhrase = generateRecoveryPhrase();
+  const { identity, content } = keysFromRecoveryPhrase(recoveryPhrase);
+  writeKeys(path, identity, content);
+  return { identity, content, recoveryPhrase };
+}
 
+/**
+ * Restore keys from a recovery phrase, on a new machine or a second desktop.
+ *
+ * Refuses to overwrite an existing keystore. If the phrase is wrong, the derived
+ * keys would be valid-looking but open nothing, and overwriting good keys with
+ * them would turn a recoverable situation into a permanent loss.
+ */
+export function restoreKeys(phrase: string, path = defaultKeystorePath()): DeviceKeys {
+  if (existsSync(path)) {
+    throw new Error(
+      `keys already exist at ${path}. Move them aside before restoring, so a ` +
+      'mistyped phrase cannot overwrite working keys.',
+    );
+  }
+  const { identity, content } = keysFromRecoveryPhrase(phrase);
+  writeKeys(path, identity, content);
+  return { identity, content };
+}
+
+function writeKeys(
+  path: string,
+  identity: { privateKey: Uint8Array; publicKey: Uint8Array },
+  content: { privateKey: Uint8Array; publicKey: Uint8Array },
+): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify({
     version: 1,
@@ -62,7 +94,6 @@ export function createKeys(path = defaultKeystorePath()): DeviceKeys {
   }, null, 2)}\n`, 'utf8');
 
   restrictPermissions(path);
-  return { identity, content };
 }
 
 export function loadKeys(path = defaultKeystorePath()): DeviceKeys {

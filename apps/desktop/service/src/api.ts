@@ -18,7 +18,17 @@ import {
   loadConfig, saveConfig, configExists, glossaryFor, addGlossaryTerms,
   Config, ConfigError, type Config as ConfigType,
 } from './config.ts';
-import { createKeys, loadKeys, keystoreExists, type DeviceKeys } from './keystore.ts';
+import { createKeys, restoreKeys, loadKeys, keystoreExists, type DeviceKeys } from './keystore.ts';
+import {
+  detect, installInstructions, listModels,
+  pullModel, probeContext, RECOMMENDED_MODELS, REJECTED_MODELS,
+  type PullProgress,
+} from './ollama.ts';
+import { isValidRecoveryPhrase } from '@inkpipe/crypto/recovery';
+import { prepForModel } from '@inkpipe/imaging';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface ServiceOptions {
   configPath?: string;
@@ -50,6 +60,16 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
   let drafts: Draft[] = [];
   let refreshing = false;
   let lastError: string | null = null;
+
+  // Model pulls are multi-gigabyte, so the UI starts one and then polls. A
+  // request that blocked for ten minutes would time out in every proxy.
+  let pull: {
+    model: string;
+    status: string;
+    percent?: number;
+    done: boolean;
+    error?: string;
+  } | null = null;
 
   const state = () => {
     const configured = configExists(options.configPath) && keystoreExists(options.keystorePath);
@@ -171,7 +191,167 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
     });
     saveConfig(config, options.configPath);
 
-    return reply.code(201).send({ deviceId: registered.deviceId });
+    // The phrase is shown once and never stored. The wizard must not let the
+    // user past this screen without confirming they have written it down.
+    return reply.code(201).send({
+      deviceId: registered.deviceId,
+      recoveryPhrase: keys.recoveryPhrase,
+    });
+  });
+
+  // --- restore (issue #4) ------------------------------------------------
+  app.post('/api/restore', async (request, reply) => {
+    if (state().configured) {
+      return reply.code(409).send({ error: 'already_configured', message: 'config already exists' });
+    }
+
+    const body = z_RestoreRequest.safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'bad_request', message: body.error.message });
+    }
+
+    // Check the phrase before touching anything. A mistyped phrase derives
+    // valid-looking keys that open nothing, so failing early is the whole point.
+    if (!isValidRecoveryPhrase(body.data.recoveryPhrase)) {
+      return reply.code(400).send({
+        error: 'bad_phrase',
+        message: 'that is not a valid recovery phrase. Check for a mistyped or missing word.',
+      });
+    }
+
+    if (!(await isGitRepo(body.data.vault.root))) {
+      return reply.code(400).send({
+        error: 'bad_vault',
+        message: `${body.data.vault.root} is not a git repository.`,
+      });
+    }
+
+    const keys = restoreKeys(body.data.recoveryPhrase, options.keystorePath);
+
+    let registered: { accountId: string; deviceId: string; restored: boolean };
+    try {
+      registered = await new InkpipeClient({ baseUrl: body.data.serverUrl })
+        .post<{ accountId: string; deviceId: string; restored: boolean }>('/pair/register-pc', {
+          joinToken: body.data.joinToken,
+          ed25519PublicKey: toBase64Url(keys.identity.publicKey),
+          x25519PublicKey: toBase64Url(keys.content.publicKey),
+          label: body.data.label,
+        });
+    } catch (error) {
+      return reply.code(502).send({
+        error: 'registration_failed',
+        message: `could not reach ${body.data.serverUrl}: ${(error as ApiError).message}`,
+      });
+    }
+
+    const config = Config.parse({
+      version: 1,
+      serverUrl: body.data.serverUrl,
+      deviceId: registered.deviceId,
+      vault: body.data.vault,
+      courses: body.data.courses ?? [],
+      defaultCourse: body.data.defaultCourse ?? 'General',
+      model: body.data.model ?? {},
+      cloudEscalationEnabled: false,
+    });
+    saveConfig(config, options.configPath);
+
+    return reply.code(201).send({
+      deviceId: registered.deviceId,
+      // false means this phrase was not previously registered on this server,
+      // which usually means a typo or the wrong server rather than a restore.
+      restored: registered.restored,
+    });
+  });
+
+  // --- ollama (issue #7) --------------------------------------------------
+  app.get('/api/ollama/status', async (request, reply) => {
+    const host = (request.query as { host?: string }).host
+      ?? (state().configured ? readConfig().model.host : 'http://127.0.0.1:11434');
+
+    const detection = await detect(host);
+    let models: Awaited<ReturnType<typeof listModels>> = [];
+    if (detection.running) {
+      try { models = await listModels(host); } catch { /* reported by running:false */ }
+    }
+
+    return reply.send({
+      host,
+      running: detection.running,
+      installed: detection.installed,
+      version: detection.version,
+      install: detection.installed ? null : installInstructions(),
+      models,
+      recommended: RECOMMENDED_MODELS,
+      // So the wizard can warn instead of letting someone rediscover ADR 0001.
+      rejected: Object.fromEntries(
+        models
+          .filter((m) => REJECTED_MODELS[m.name] !== undefined)
+          .map((m) => [m.name, REJECTED_MODELS[m.name]]),
+      ),
+    });
+  });
+
+  app.post('/api/ollama/pull', async (request, reply) => {
+    const body = z_PullRequest.safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'bad_request', message: body.error.message });
+    }
+    if (pull && !pull.done) {
+      return reply.code(409).send({ error: 'busy', message: `already pulling ${pull.model}` });
+    }
+
+    const host = body.data.host ?? 'http://127.0.0.1:11434';
+    pull = { model: body.data.model, status: 'starting', done: false };
+
+    // Deliberately not awaited: the pull runs for minutes and the UI polls.
+    void pullModel(host, body.data.model, (progress: PullProgress) => {
+      pull = {
+        model: body.data.model,
+        status: progress.status,
+        percent: progress.percent,
+        done: false,
+      };
+    }).then(() => {
+      pull = { model: body.data.model, status: 'complete', percent: 100, done: true };
+    }).catch((error: Error) => {
+      pull = { model: body.data.model, status: 'failed', done: true, error: error.message };
+    });
+
+    return reply.code(202).send({ started: true, model: body.data.model });
+  });
+
+  app.get('/api/ollama/pull', async (_request, reply) => reply.send(pull ?? { idle: true }));
+
+  app.post('/api/ollama/probe', async (request, reply) => {
+    const body = z_ProbeRequest.safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'bad_request', message: body.error.message });
+    }
+
+    // Probe with a REAL prepared page, not a synthetic one. ADR 0001 finding 3b
+    // is about how much a real page costs, and a blank square would not answer
+    // the question.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const sample = join(here, '../../../../packages/corpus/images/page-b-meldable-priority-queues.jpg');
+
+    let prepared: Uint8Array;
+    try {
+      prepared = await prepForModel(readFileSync(sample));
+    } catch (error) {
+      return reply.code(500).send({
+        error: 'no_sample',
+        message: `could not prepare the probe image: ${(error as Error).message}`,
+      });
+    }
+
+    const result = await probeContext(
+      body.data.host ?? 'http://127.0.0.1:11434',
+      body.data.model,
+      body.data.numCtx,
+      prepared,
+    );
+    return reply.send(result);
   });
 
   // --- pairing -----------------------------------------------------------
@@ -408,6 +588,22 @@ const z_SetupRequest = z.object({
   }).optional(),
   pollSeconds: z.number().int().min(10).max(3600).optional(),
   verbosity: z.enum(['verbatim', 'cleaned', 'expanded']).optional(),
+});
+
+const z_RestoreRequest = z_SetupRequest.omit({ label: true }).extend({
+  label: z.string().min(1).max(64).default('desktop'),
+  recoveryPhrase: z.string().min(1),
+});
+
+const z_PullRequest = z.object({
+  model: z.string().min(1).max(120),
+  host: z.string().url().optional(),
+});
+
+const z_ProbeRequest = z.object({
+  model: z.string().min(1).max(120),
+  numCtx: z.number().int().min(2048).max(131072),
+  host: z.string().url().optional(),
 });
 
 const z_ApproveRequest = z.object({

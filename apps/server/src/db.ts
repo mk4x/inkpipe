@@ -120,6 +120,28 @@ export class Store {
     };
   }
 
+  /**
+   * Look a device up by its identity public key.
+   *
+   * This is what makes recovery work: a desktop restored from its recovery
+   * phrase derives the same keys, so it can find the device row it already owns
+   * instead of creating a second account that cannot see its own pending pages.
+   */
+  getDeviceByIdentityKey(ed25519PublicKey: string): Device | null {
+    const row = this.db
+      .prepare('SELECT * FROM devices WHERE ed25519_public_key = ?')
+      .get(ed25519PublicKey) as Record<string, string> | undefined;
+    if (!row) return null;
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      role: row.role as 'phone' | 'pc',
+      ed25519PublicKey: row.ed25519_public_key,
+      x25519PublicKey: row.x25519_public_key ?? null,
+      label: row.label,
+    };
+  }
+
   /** The desktop's content key, which is what a phone seals to. */
   getPcContentKey(accountId: string): string | null {
     const row = this.db

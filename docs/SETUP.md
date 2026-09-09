@@ -25,6 +25,14 @@ npm run ui:build
 npm run desktop
 ```
 
+The wizard walks six steps: server, vault, courses, model, recovery phrase, and
+pairing. The model step checks whether Ollama is installed and running, offers
+the exact install command for your platform if it is not, downloads the model
+with a progress readout, and then **probes a real prepared page against the
+context size** you chose. That last check exists because image token cost varies
+more than fourfold between models, so a page that overflows fails mid-session
+rather than degrading.
+
 The service prints a URL with a one-time token in the fragment:
 
 ```
@@ -50,14 +58,39 @@ npm run ui:dev         # terminal two, proxies /api to the service
 | Config | `%APPDATA%\inkpipe\config.json` | `$XDG_CONFIG_HOME/inkpipe/config.json` |
 | Keys | `%APPDATA%\inkpipe\keys.json` | `$XDG_CONFIG_HOME/inkpipe/keys.json` |
 
-**`keys.json` holds both private keys.** Losing the X25519 content key makes
-every page still sitting on the server permanently unreadable. There is no
-recovery code yet: that is issue #4, and until it lands, this file is worth
-backing up somewhere you trust.
+**`keys.json` holds both private keys**, and they are **derived from your
+recovery phrase**. That means the file is replaceable: type the phrase on a new
+machine and the identical keys come back. Nothing needs backing up except the
+phrase itself.
 
 Storage today is a mode-0600 file, which is honest rather than ideal: anything
-running as your user can read it. Moving to the OS keyring is tracked in the
-same issue.
+running as your user can read it. Moving to the OS keyring is still open.
+
+## The recovery phrase
+
+The wizard shows 24 words once, at setup, and never again. They are **not stored
+anywhere**: not on this computer, not on your server. Nobody can retrieve them
+for you.
+
+They are worth writing on paper. Without them, if this machine dies, every page
+still waiting on the server becomes permanently unreadable.
+
+The same phrase also adds a second computer to the same account. Choose
+**Restore from a recovery phrase** in the wizard on the second machine, and it
+derives the identical keys and rejoins the existing account rather than creating
+a new one.
+
+Two things the wizard deliberately refuses to do:
+
+- It will not let you past the phrase screen without ticking the confirmation.
+- It will not overwrite an existing `keys.json` during a restore. A mistyped
+  phrase derives valid-looking keys that open nothing, and overwriting good keys
+  with them would turn a recoverable situation into a permanent loss. Move the
+  file aside yourself if you really mean to.
+
+If a restore reports that the server has no record of your phrase, you almost
+certainly typed the wrong server address. Nothing was recovered, and a new empty
+account was created instead.
 
 ## The config file
 

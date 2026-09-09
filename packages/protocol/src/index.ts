@@ -66,6 +66,10 @@ export const RegisterPcRequest = z.object({
 export const RegisterPcResponse = z.object({
   accountId: Uuid,
   deviceId: Uuid,
+  /** True when this identity key was already registered and the existing device
+   *  was returned. That is a desktop restored from its recovery phrase, or a
+   *  second desktop set up with the same phrase, rather than a new account. */
+  restored: z.boolean(),
 });
 
 export const CreatePairingRequest = z.object({

@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { api, ServiceError, type Status, type Draft, type PageDraft } from './api.ts';
+import Wizard from './Wizard.tsx';
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Decided once, from the first status, and then owned by the wizard.
+  //
+  // This must NOT be derived from status.configured on every poll. Setup makes
+  // configured flip to true several steps before the wizard is finished, and
+  // re-deriving swapped the wizard out for the dashboard mid-flow. The screen
+  // that got skipped was the recovery phrase, which is shown exactly once and
+  // cannot be recovered, so the bug silently cost the user their only copy.
+  const [inWizard, setInWizard] = useState<boolean | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -20,8 +29,14 @@ export default function App() {
     return () => clearInterval(timer);
   }, [reload]);
 
-  if (!status) return <Splash error={error} />;
-  if (!status.configured) return <Setup onDone={reload} />;
+  useEffect(() => {
+    if (status && inWizard === null) setInWizard(!status.configured);
+  }, [status, inWizard]);
+
+  if (!status || inWizard === null) return <Splash error={error} />;
+  if (inWizard) {
+    return <Wizard onDone={() => { setInWizard(false); void reload(); }} />;
+  }
   return <Dashboard status={status} onChange={reload} />;
 }
 
@@ -30,121 +45,6 @@ function Splash({ error }: { error: string | null }) {
     <main className="centre">
       <h1>inkpipe</h1>
       {error ? <p className="bad">{error}</p> : <p className="muted">connecting to the local service...</p>}
-    </main>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Setup
-// ---------------------------------------------------------------------------
-
-function Setup({ onDone }: { onDone: () => void }) {
-  const [form, setForm] = useState({
-    serverUrl: '',
-    joinToken: '',
-    vaultRoot: '',
-    notesPath: 'School/Semesters/Semester 5',
-    attachmentsPath: 'Images',
-    courses: '',
-    defaultCourse: 'General',
-  });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const courses = form.courses
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((name) => ({ name, glossary: [] }));
-
-      await api.setup({
-        serverUrl: form.serverUrl.trim(),
-        joinToken: form.joinToken.trim(),
-        label: 'desktop',
-        vault: {
-          root: form.vaultRoot.trim(),
-          notesPath: form.notesPath.trim(),
-          attachmentsPath: form.attachmentsPath.trim(),
-        },
-        courses,
-        defaultCourse: form.defaultCourse.trim() || 'General',
-      });
-      onDone();
-    } catch (e) {
-      setError(e instanceof ServiceError ? e.message : (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <main className="narrow">
-      <h1>Set up inkpipe</h1>
-      <p className="muted">
-        Nothing here is hardcoded. These values live in your config file and can be changed later.
-      </p>
-
-      <form onSubmit={submit}>
-        <fieldset>
-          <legend>Your server</legend>
-          <label>
-            Server URL
-            <input value={form.serverUrl} onChange={set('serverUrl')} placeholder="https://inkpipe.example.com" required />
-          </label>
-          <label>
-            Join token
-            <input value={form.joinToken} onChange={set('joinToken')} placeholder="printed by ops/bootstrap-vps.sh" required />
-            <small>Printed on the server when you ran the bootstrap script.</small>
-          </label>
-        </fieldset>
-
-        <fieldset>
-          <legend>Your vault</legend>
-          <label>
-            Vault folder
-            {/* JSX attributes are not escaped strings, so a single backslash
-                here renders as a single backslash. */}
-            <input value={form.vaultRoot} onChange={set('vaultRoot')} placeholder="C:\Users\you\vault" required />
-            <small>Must be a git repository. inkpipe commits every note it writes.</small>
-          </label>
-          <label>
-            Notes go in
-            <input value={form.notesPath} onChange={set('notesPath')} required />
-          </label>
-          <label>
-            Images go in
-            <input value={form.attachmentsPath} onChange={set('attachmentsPath')} required />
-          </label>
-        </fieldset>
-
-        <fieldset>
-          <legend>Your courses</legend>
-          <label>
-            One per line
-            <textarea value={form.courses} onChange={set('courses')} rows={5}
-              placeholder={'Operating Systems\nAlgorithms and Data Structures\nNetwork Flow'} />
-            <small>
-              Course vocabulary is what stops the model looping on dense pages. It grows
-              automatically from your corrections.
-            </small>
-          </label>
-          <label>
-            Default course
-            <input value={form.defaultCourse} onChange={set('defaultCourse')} />
-          </label>
-        </fieldset>
-
-        {error && <p className="bad">{error}</p>}
-        <button type="submit" disabled={busy}>{busy ? 'Setting up...' : 'Finish setup'}</button>
-      </form>
     </main>
   );
 }

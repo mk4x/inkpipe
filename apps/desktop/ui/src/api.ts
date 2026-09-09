@@ -72,9 +72,30 @@ export interface Draft {
   pages: PageDraft[];
 }
 
+export interface OllamaStatus {
+  host: string;
+  running: boolean;
+  installed: boolean;
+  version: string | null;
+  install: { platform: string; command: string; note: string } | null;
+  models: { name: string; sizeBytes: number; vision: boolean }[];
+  recommended: { name: string; label: string; note: string; recommended: boolean }[];
+  rejected: Record<string, string>;
+}
+
+export interface PullState {
+  model: string;
+  status: string;
+  percent?: number;
+  done: boolean;
+  error?: string;
+  idle?: boolean;
+}
+
 export const api = {
   status: () => call<Status>('GET', '/api/status'),
-  setup: (body: unknown) => call<{ deviceId: string }>('POST', '/api/setup', body),
+  setup: (body: unknown) =>
+    call<{ deviceId: string; recoveryPhrase: string }>('POST', '/api/setup', body),
   pairing: () => call<{ qr: string; expiresAt: string }>('POST', '/api/pairing'),
   refresh: () => call<{ drafts: number }>('POST', '/api/refresh'),
   drafts: () => call<{ drafts: Draft[] }>('GET', '/api/drafts'),
@@ -84,4 +105,17 @@ export const api = {
     ),
   push: () => call<{ outcome: string }>('POST', '/api/push'),
   config: () => call<Record<string, unknown>>('GET', '/api/config'),
+
+  restore: (body: unknown) =>
+    call<{ deviceId: string; restored: boolean }>('POST', '/api/restore', body),
+
+  ollamaStatus: (host?: string) =>
+    call<OllamaStatus>('GET', `/api/ollama/status${host ? `?host=${encodeURIComponent(host)}` : ''}`),
+  pullModel: (model: string, host?: string) =>
+    call<{ started: boolean }>('POST', '/api/ollama/pull', { model, host }),
+  pullStatus: () => call<PullState>('GET', '/api/ollama/pull'),
+  probeModel: (model: string, numCtx: number, host?: string) =>
+    call<{ ok: boolean; message: string; promptTokens?: number; suggestedNumCtx?: number }>(
+      'POST', '/api/ollama/probe', { model, numCtx, host },
+    ),
 };

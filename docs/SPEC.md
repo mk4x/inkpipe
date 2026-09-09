@@ -92,9 +92,25 @@ Creates an account and the `pc` device in one step.
 
 ```
 -> { joinToken, ed25519PublicKey, x25519PublicKey, label }
-<- 201 { accountId, deviceId }
+<- 201 { accountId, deviceId, restored: false }   new account
+<- 200 { accountId, deviceId, restored: true }    already registered
 <- 401 on a wrong join token
+<- 409 content_key_mismatch
 ```
+
+**Idempotent on the identity key.** If that Ed25519 key is already registered,
+the existing account and device are returned rather than a second account being
+created. This is what makes recovery work: a desktop restored from its recovery
+phrase derives the identical keys, so it finds the account it already owns and
+can see its own pending pages. The same mechanism lets a second desktop join one
+account by entering the same phrase.
+
+`409 content_key_mismatch` is returned when the identity key matches but the
+X25519 content key does not. Accepting a new content key would orphan every blob
+already sealed to the old one, so the server refuses rather than guessing.
+
+The join token is still required on a restore. Knowing a recovery phrase is not
+enough to register against someone else's server.
 
 ### `POST /pair/create`  (pc only)
 
@@ -192,12 +208,35 @@ The only plaintext metadata is `sessionId`, `seq`, `sizeBytes` and `capturedAt`,
 which are needed to group pages and enforce quota, and which say nothing about
 content.
 
-## 9. PLANNED
+## 9. Recovery
+
+Decision 17, issue #4.
+
+The desktop keys are **derived from a 24 word recovery phrase**, not generated
+randomly and then wrapped. That distinction is the whole design:
+
+- Wrapping random keys means the wrapped blob has to live somewhere, and after a
+  disk failure "somewhere" is exactly what you no longer have.
+- Deriving means the phrase alone is sufficient. Type it on a new machine and
+  the identical keys come back. Nothing to back up, and nothing for the server
+  to hold.
+
+```
+phrase -> BIP39 seed -> HKDF-SHA256, distinct info strings
+                          -> Ed25519 identity private key
+                          -> X25519  content  private key
+```
+
+The trade is that the phrase cannot be rotated without changing identity. For a
+personal notes tool that is correct: a recovery path that depends on a file you
+also lost is not a recovery path.
+
+The server stores no key material and needs no recovery endpoint. Restore is
+just `POST /pair/register-pc` with the derived keys, which is idempotent.
+
+## 10. PLANNED
 
 Not built yet, listed so the gaps are explicit:
-
-- Recovery code that wraps the desktop content key (decision 17)
-- Second desktop paired to one account
 - Retention sweep on a timer (`pruneExpired` exists and is unscheduled)
 - Rate limiting per device
-- The phone's local 90 day backup store (decision 15)
+- OS keyring storage for the desktop keys, which are currently a mode-0600 file

@@ -383,3 +383,136 @@ describe('session grouping', () => {
     assert.deepEqual(ours.map((b) => b.seq), [0, 1, 2]);
   });
 });
+
+describe('recovery (issue #4)', () => {
+  test('re-registering the same identity returns the SAME device, not a new account', async () => {
+    // The restore path: a desktop derives identical keys from its recovery
+    // phrase. It must find the account it already owns, otherwise it creates a
+    // second one and cannot see its own pending pages.
+    const identity = generateIdentityKeyPair();
+    const content = generateContentKeyPair();
+    const anonymous = new InkpipeClient({ baseUrl, now: () => clock });
+
+    const body = {
+      joinToken: JOIN_TOKEN,
+      ed25519PublicKey: toBase64Url(identity.publicKey),
+      x25519PublicKey: toBase64Url(content.publicKey),
+      label: 'desktop',
+    };
+
+    const first = await anonymous.post<{ accountId: string; deviceId: string; restored: boolean }>(
+      '/pair/register-pc', body,
+    );
+    assert.equal(first.restored, false);
+
+    const second = await anonymous.post<{ accountId: string; deviceId: string; restored: boolean }>(
+      '/pair/register-pc', body,
+    );
+    assert.equal(second.restored, true, 'a repeat registration must be flagged as restored');
+    assert.equal(second.deviceId, first.deviceId, 'the device id must survive a restore');
+    assert.equal(second.accountId, first.accountId, 'the account must survive a restore');
+  });
+
+  test('a restored desktop can still read pages uploaded before the loss', async () => {
+    const identity = generateIdentityKeyPair();
+    const content = generateContentKeyPair();
+    const anonymous = new InkpipeClient({ baseUrl, now: () => clock });
+
+    const registered = await anonymous.post<{ deviceId: string }>('/pair/register-pc', {
+      joinToken: JOIN_TOKEN,
+      ed25519PublicKey: toBase64Url(identity.publicKey),
+      x25519PublicKey: toBase64Url(content.publicKey),
+      label: 'desktop',
+    });
+
+    const pc = new InkpipeClient({
+      baseUrl, now: () => clock,
+      credentials: { deviceId: registered.deviceId, ed25519PrivateKey: identity.privateKey },
+    });
+    const pairing = await pc.post<{ pairingToken: string }>('/pair/create', { ttlSeconds: 300 });
+
+    const phoneIdentity = generateIdentityKeyPair();
+    const paired = await anonymous.post<{ deviceId: string; x25519PublicKey: string }>('/pair/complete', {
+      pairingToken: pairing.pairingToken,
+      ed25519PublicKey: toBase64Url(phoneIdentity.publicKey),
+      label: 'phone',
+    });
+    const phone = new InkpipeClient({
+      baseUrl, now: () => clock,
+      credentials: { deviceId: paired.deviceId, ed25519PrivateKey: phoneIdentity.privateKey },
+    });
+
+    const plaintext = new TextEncoder().encode('a page uploaded before the disk died');
+    const uploaded = uploadBody(seal(plaintext, content.publicKey));
+    await phone.post('/blobs', uploaded);
+
+    // ... the desktop dies and is restored from its phrase, deriving the same
+    // keys, so this is the same client from the server's point of view ...
+    const restored = await anonymous.post<{ deviceId: string; restored: boolean }>('/pair/register-pc', {
+      joinToken: JOIN_TOKEN,
+      ed25519PublicKey: toBase64Url(identity.publicKey),
+      x25519PublicKey: toBase64Url(content.publicKey),
+      label: 'replacement desktop',
+    });
+    assert.equal(restored.restored, true);
+
+    const restoredPc = new InkpipeClient({
+      baseUrl, now: () => clock,
+      credentials: { deviceId: restored.deviceId, ed25519PrivateKey: identity.privateKey },
+    });
+
+    const pending = await restoredPc.get<{ blobs: { blobId: string }[] }>('/blobs');
+    assert.ok(pending.blobs.some((b) => b.blobId === uploaded.blobId), 'the waiting page must still be visible');
+
+    const downloaded = await restoredPc.get<{ ciphertext: string }>(`/blobs/${uploaded.blobId}`);
+    const opened = open(fromBase64(downloaded.ciphertext), content.privateKey);
+    assert.equal(new TextDecoder().decode(opened), 'a page uploaded before the disk died',
+      'and it must still decrypt');
+  });
+
+  test('refuses a different content key for an existing identity', async () => {
+    // Accepting it would orphan every blob already sealed to the old key.
+    const identity = generateIdentityKeyPair();
+    const anonymous = new InkpipeClient({ baseUrl, now: () => clock });
+
+    await anonymous.post('/pair/register-pc', {
+      joinToken: JOIN_TOKEN,
+      ed25519PublicKey: toBase64Url(identity.publicKey),
+      x25519PublicKey: toBase64Url(generateContentKeyPair().publicKey),
+      label: 'desktop',
+    });
+
+    await assert.rejects(
+      () => anonymous.post('/pair/register-pc', {
+        joinToken: JOIN_TOKEN,
+        ed25519PublicKey: toBase64Url(identity.publicKey),
+        x25519PublicKey: toBase64Url(generateContentKeyPair().publicKey),
+        label: 'desktop',
+      }),
+      (e: ApiError) => e.status === 409 && e.code === 'content_key_mismatch',
+    );
+  });
+
+  test('a restore still needs the join token', async () => {
+    const identity = generateIdentityKeyPair();
+    const content = generateContentKeyPair();
+    const anonymous = new InkpipeClient({ baseUrl, now: () => clock });
+
+    await anonymous.post('/pair/register-pc', {
+      joinToken: JOIN_TOKEN,
+      ed25519PublicKey: toBase64Url(identity.publicKey),
+      x25519PublicKey: toBase64Url(content.publicKey),
+      label: 'desktop',
+    });
+
+    await assert.rejects(
+      () => anonymous.post('/pair/register-pc', {
+        joinToken: 'wrong-token-aaaaaaaaaaaa',
+        ed25519PublicKey: toBase64Url(identity.publicKey),
+        x25519PublicKey: toBase64Url(content.publicKey),
+        label: 'desktop',
+      }),
+      (e: ApiError) => e.status === 401,
+    );
+  });
+});
