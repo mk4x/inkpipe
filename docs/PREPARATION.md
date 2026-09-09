@@ -301,8 +301,9 @@ verifying a native module build is better done when the phone app is scaffolded.
   target.** Either accept 257 KB or drop WebP quality from 80 to about 72. Not
   changed unilaterally because decision 24 names the number, and changing it
   means amending this document.
-- **`prepForVault` emits 257 KB**, against decision 24's roughly 200 KB target.
-  The owner chose to keep WebP quality 80, so 257 KB is accepted.
+- **`prepForVault` emits 193 to 257 KB** depending on the page, against
+  decision 24's roughly 200 KB target. The owner chose to keep WebP quality 80.
+  Measured: page B 257 KB, page D 193 KB.
 - `~/.gitconfig` has a typo: a `[uiser]` section alongside `[user]`. Harmless,
   worth fixing.
 
