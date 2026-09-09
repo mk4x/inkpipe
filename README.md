@@ -3,7 +3,12 @@
 Photograph handwritten notes on your phone. They arrive as formatted Markdown in
 your Obsidian vault, transcribed by a local vision model on your own PC.
 
-**Status: planning.** No code yet. Start with [docs/PREPARATION.md](docs/PREPARATION.md).
+**Status: vertical slice working.** Phone to server to desktop to a committed
+vault note, end to end, with 120 tests and CI green on Windows and Linux. No UI
+yet: the phone and desktop apps are issues #5 and #6.
+
+Start with [docs/PREPARATION.md](docs/PREPARATION.md) for every design decision
+and its rationale, or [docs/SPEC.md](docs/SPEC.md) for the wire protocol.
 
 ```
 phone (Expo)          VPS (Fastify)         PC (Tauri + Ollama)      vault (git)

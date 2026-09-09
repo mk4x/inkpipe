@@ -266,17 +266,23 @@ cannot be checked by eye is not a rule.
 
 No UI work happens before the vertical slice is green.
 
-1. **Model spike.** Install Ollama, pull the best vision models that fit in
-   16 GB, run the sample pages, score against the hand-written expected
-   transcript. Decide whether local-first survives. Also verify the Expo
-   document scanner plugin builds.
-2. **Vertical slice.** Fake phone client, real server, real PC path, a real file
-   committed to a scratch vault. End to end, ugly, working.
-3. Protocol and crypto hardened, cross-language vectors green.
-4. Real capture UI on the phone.
-5. Preview editor on the desktop.
-6. Setup wizard.
-7. Feedback loop and corpus tooling.
+Tracked as GitHub issues. Status as of 2026-09-09:
+
+1. ~~**Model spike.**~~ **DONE** (#1). Local-first survives. See
+   [adr/0001](adr/0001-local-first-transcription.md).
+2. ~~**Vertical slice.**~~ **DONE** (#2). Fake phone, real server, real
+   decryption, fake model, real vault with real git. 120 tests, CI green on
+   Windows and Linux. Protocol documented in [SPEC.md](SPEC.md).
+3. Cross-language crypto vectors, TypeScript encrypt to Rust decrypt (#3).
+4. Recovery code for the desktop content key (#4).
+5. Phone app: Expo capture, pairing, local backup (#5).
+6. Desktop: Tauri shell and the preview editor (#6).
+7. Setup wizard (#7).
+8. Feedback loop and corpus growth (#8).
+
+Note the Expo document-scanner plugin build check moved from step 1 to #5: the
+spike answered the model question, which was the load-bearing unknown, and
+verifying a native module build is better done when the phone app is scaffolded.
 
 ## 15. Open items
 
@@ -295,5 +301,24 @@ No UI work happens before the vertical slice is green.
   target.** Either accept 257 KB or drop WebP quality from 80 to about 72. Not
   changed unilaterally because decision 24 names the number, and changing it
   means amending this document.
+- **`prepForVault` emits 257 KB**, against decision 24's roughly 200 KB target.
+  The owner chose to keep WebP quality 80, so 257 KB is accepted.
 - `~/.gitconfig` has a typo: a `[uiser]` section alongside `[user]`. Harmless,
   worth fixing.
+
+## 16. Lessons that cost real time
+
+Recorded because each was a silent failure, which is the expensive kind.
+
+- **A checker that cannot detect its own target protects nothing.** The em dash
+  check passed on every run for four commits while matching nothing: Git Bash's
+  `printf` does not interpret a `\u` escape, so the needle was a literal string.
+  Every guard now needs a self-test proving it can fail. Wired into hook and CI.
+- **Verify orientation before trusting a score.** Page A was first prepped with
+  the wrong rotation, which would have read as a bad model rather than a bad
+  pipeline.
+- **A reference transcript can be wrong.** Page A's expected text was rewritten
+  after contrast normalisation revealed the right-hand side was a table, not a
+  free-form diagram. Scores against a wrong reference are worse than no scores.
+- **Node strip-only TypeScript rejects parameter properties**, enums, namespaces
+  and decorators. Assign fields explicitly.
