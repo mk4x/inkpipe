@@ -71,8 +71,15 @@ arrows, a Host 1 to Host 2 migration diagram) rather than textual.
    Recognising "Meldable" and "Leftist" came partly from the strokes and partly
    from knowing the data structures. A local 7B model has far less of that prior.
    **Per-course context priming is therefore load-bearing, not a nice-to-have.**
-3. A local model on 16 GB of VRAM is unlikely to handle Page A acceptably. That
-   assumption is currently **untested**, and testing it is issue #1.
+3. ~~A local model on 16 GB of VRAM is unlikely to handle Page A acceptably.~~
+   **RESOLVED 2026-09-09 by issue #1, see [adr/0001](adr/0001-local-first-transcription.md).**
+   Local-first survives. Page B reached CER 0.099 with 91 percent term coverage,
+   which is a usable draft. Page A reached only CER 0.567 even at its best, so
+   the pessimism was correct for diagram-dense pages and wrong for linear ones.
+   Two findings changed the design: the dominant failure mode is **degenerate
+   repetition** rather than misreading, and **course priming is what prevents
+   it** (Page A went from a 593 line loop to a clean pass purely by adding a
+   course glossary). Conclusion 2 above is therefore measured, not argued.
 
 ## 5. Target hardware and environment
 
@@ -122,6 +129,9 @@ Every row was an explicit question with a recommendation and an answer.
 | 23 | Doc drift | Mechanically enforced for two pairs, written rules for the rest | A vague "keep docs updated" is a rule nobody follows. |
 | 24 | Vault images | Aggressive compression, no Git LFS | Roughly 200 KB per page, greyscale, 1600px long edge, WebP q80. A thousand pages is 200 MB. LFS adds a dependency every self-hoster must install. |
 | 25 | Tooling | npm workspaces, plain scripts | Turborepo noted as a later option if CI becomes slow. |
+| 26 | Default model | `qwen2.5vl:7b`. `minicpm-v:8b` rejected | Measured in [adr/0001](adr/0001-local-first-transcription.md). minicpm produced degenerate output on both pages. |
+| 27 | Image prep and priming | Both are required pipeline stages, not settings | Raw pages hard-fail the default context, prep halves CER on the hard page, and priming is what stops the repetition loop. |
+| 28 | Degeneracy gate | Every transcript is checked for repetition loops before it reaches the preview | The failure mode is confidently wrong output returned with HTTP 200. Retry once, then surface as a failed page with the cropped original. Never write it silently. |
 
 ## 7. Stack summary
 
@@ -240,7 +250,9 @@ cannot be checked by eye is not a rule.
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| Local model cannot read the handwriting well enough | **Critical** | Issue #1 is a spike that answers this in a day, before any product code |
+| ~~Local model cannot read the handwriting well enough~~ | **RETIRED** | Answered by issue #1 on 2026-09-09. Linear pages work, diagram-dense pages need cloud escalation. See [adr/0001](adr/0001-local-first-transcription.md) |
+| A good CER still hides semantic inversions | **High** | Measured: at CER 0.116 the model still flipped "not just violations" to "that just violate". Decision 21 (full preview editor) is the only mitigation, and decision 20 (mark added content) supports it |
+| Corpus of two pages is too small to tune prompts against | Medium | Add pages before any prompt tuning is trusted. Decision 21 makes every correction a new corpus entry, so this fixes itself with use |
 | Scope creep kills the project | **High** | `mk4x/Sort-Written-Notes`, created November 2025, is an empty repo. This exact idea has already failed once by never starting. The tracer bullet order in section 14 is the countermeasure |
 | One month is optimistic for four surfaces | **High** | Section 3 non-goals are load-bearing. Cut further rather than half-finish |
 | Diagram pages degrade badly | Medium | Decision 8 means the cropped original is always present and always correct |
@@ -266,8 +278,17 @@ No UI work happens before the vertical slice is green.
 
 ## 15. Open items
 
-- **Sample photographs are not yet in the repo.** `packages/corpus/images/` is
-  empty. The two assessed pages must be added before issue #1 can run.
-- Default model choice is deliberately unset. It is an output of issue #1.
+- ~~Sample photographs are not yet in the repo.~~ Added 2026-09-09, both pages
+  present with hand-written references.
+- ~~Default model choice is deliberately unset.~~ Resolved: `qwen2.5vl:7b`.
+- **`llama3.2-vision:11b` is untested.** It had not finished downloading when
+  issue #1 was written up. Run `node spike.mjs --model llama3.2-vision:11b
+  --primed` once it is present and append the result to adr/0001.
+- **The corpus has two pages.** That is enough to pick a direction and not
+  enough to tune a prompt. Add pages before trusting any tuning.
+- **`prepForVault` currently emits 257 KB, against decision 24's roughly 200 KB
+  target.** Either accept 257 KB or drop WebP quality from 80 to about 72. Not
+  changed unilaterally because decision 24 names the number, and changing it
+  means amending this document.
 - `~/.gitconfig` has a typo: a `[uiser]` section alongside `[user]`. Harmless,
   worth fixing.

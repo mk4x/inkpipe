@@ -1,0 +1,14 @@
+{
+  "name": "@inkpipe/corpus",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Golden corpus, deterministic scorer, and the model spike harness.",
+  "scripts": {
+    "spike": "node spike.mjs",
+    "score": "node score.mjs"
+  },
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}
