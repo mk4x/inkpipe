@@ -38,3 +38,10 @@ apps/phone/.expo/
 
 # Built APKs, produced by apps/phone build
 dist/
+
+# Local runtime config and credentials. These belong in the OS config
+# directory, never in the repo, and never in a commit.
+config.json
+secrets.json
+keys.json
+research.json
