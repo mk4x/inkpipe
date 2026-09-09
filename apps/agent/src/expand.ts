@@ -101,6 +101,95 @@ const REFUSAL = 'I do not know this term';
 const refuses = (text: string) => new RegExp(REFUSAL, 'i').test(text);
 
 // ---------------------------------------------------------------------------
+// Choosing what to expand
+//
+// Until now the terms were supplied by hand, by the spike harnesses. Running
+// for real needs them picked off the page, and that pick is the input to every
+// check that follows, so it is constrained hard.
+//
+// Terms must appear VERBATIM on the page. That is not tidiness. CLAUDE.md rule
+// 4 lets a model contribute a query term and never choose one freely, and a
+// term copied from the transcript is a term the student wrote down. A model
+// that invents "quantum leftist heaps" gets it dropped here rather than
+// searched for.
+// ---------------------------------------------------------------------------
+
+export function extractPrompt(notes: string, course?: string, limit = 12): string {
+  return [
+    course ? `These are notes from a course on ${course}.` : 'These are lecture notes.',
+    '',
+    notes,
+    '',
+    `List up to ${limit} technical terms from these notes that a student would`,
+    'want explained later. Prefer terms written as bare keywords with no',
+    'explanation, since those are the ones that will mean nothing in a month.',
+    '',
+    'Copy each term exactly as it is written in the notes.',
+    'One term per line. No numbering, no bullets, no commentary.',
+  ].join('\n');
+}
+
+/** Normalised for comparison: case, spacing and surrounding punctuation. */
+function normalise(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Parse a term list and keep only terms actually present on the page.
+ *
+ * Pure and exported so the filtering rules can be tested without a model.
+ */
+export function parseTerms(raw: string, notes: string, limit: number): string[] {
+  const haystack = normalise(notes);
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const line of raw.split('\n')) {
+    const term = line
+      // Models produce numbered or bulleted lists however firmly you ask them not to.
+      .replace(/^\s*(?:[-*+]|\d+[.)])\s*/, '')
+      .replace(/^["'`]+|["'`:,.]+$/g, '')
+      .trim();
+
+    if (term.length < 2 || term.length > MAX_TERM_CHARS) continue;
+
+    const key = normalise(term);
+    if (seen.has(key)) continue;
+    // The guard that matters: it has to be on the page.
+    if (!haystack.includes(key)) continue;
+
+    seen.add(key);
+    out.push(term);
+    if (out.length >= limit) break;
+  }
+
+  return out;
+}
+
+/** Kept in step with search.MAX_TERM_LENGTH, and enforced independently so
+ *  extraction is safe even when research is switched off. */
+const MAX_TERM_CHARS = 120;
+
+export interface ExtractOptions {
+  notes: string;
+  course?: string;
+  model: ModelFn;
+  limit?: number;
+}
+
+/** Ask the model which terms are worth expanding, then discard its inventions. */
+export async function extractTerms(options: ExtractOptions): Promise<string[]> {
+  const limit = options.limit ?? 12;
+  if (options.notes.trim().length === 0) return [];
+
+  const raw = await options.model(
+    extractPrompt(options.notes, options.course, limit),
+    { temperature: 0 },
+  );
+  return parseTerms(raw, options.notes, limit);
+}
+
+// ---------------------------------------------------------------------------
 // Prompts. Each is deliberately narrow: one term, or one binary judgement.
 // Small models are poor at open generation and much better at bounded tasks,
 // which is the entire reason this is split into steps rather than one call.

@@ -12,6 +12,11 @@ import type { BlobMeta, PendingBlobsResponse } from '@inkpipe/protocol';
 import { transcribePage, type TranscribeOptions, type PromptVariant } from './transcribe.ts';
 import { inertMarkdown, sanitizeSegment } from './sanitize.ts';
 import { formatMarkdown, type FormatOptions } from './format.ts';
+import {
+  extractTerms, expandTerms, renderExpansions,
+  type Expansion, type ResearchOptions,
+} from './expand.ts';
+import type { ModelFn } from './evidence.ts';
 
 export interface PageDraft {
   blobId: string;
@@ -39,6 +44,25 @@ export interface Draft {
   course: string;
   pages: PageDraft[];
   blobIds: string[];
+  /** Empty when expansion is switched off. Per note rather than per page: the
+   *  note is what a reader revises from, and a term introduced on page one is
+   *  usually explained by page two. */
+  expansions: Expansion[];
+  /** Set when expansion was asked for and could not run. Surfaced rather than
+   *  swallowed, so "no explanations" is never ambiguous. */
+  expansionError: string | null;
+}
+
+/** ADR 0003 and ADR 0004. Off unless supplied. */
+export interface ExpansionOptions {
+  /** A TEXT model, separate from the vision one. They run sequentially, so
+   *  both fit on one card. */
+  model: ModelFn;
+  samples?: number;
+  agreementThreshold?: number;
+  maxTermsPerNote?: number;
+  /** ADR 0004. Omit to expand with no network at all. */
+  research?: ResearchOptions;
 }
 
 export interface CollectOptions extends TranscribeOptions {
@@ -50,6 +74,7 @@ export interface CollectOptions extends TranscribeOptions {
   /** Degrees clockwise. The real app derives this from the phone's orientation
    *  metadata; the slice takes it as a parameter. */
   rotate?: number;
+  expansion?: ExpansionOptions;
 }
 
 /** Group pending blobs into capture sessions (decision 9: one note per session). */
@@ -127,6 +152,8 @@ export async function collectDrafts(options: CollectOptions): Promise<Draft[]> {
     }
 
     const firstGood = pages.find((p) => p.ok);
+    const { expansions, expansionError } = await expandDraft(pages, options);
+
     drafts.push({
       sessionId,
       suggestedTitle: firstGood
@@ -135,10 +162,55 @@ export async function collectDrafts(options: CollectOptions): Promise<Draft[]> {
       course: options.course,
       pages,
       blobIds: metas.map((m) => m.blobId),
+      expansions,
+      expansionError,
     });
   }
 
   return drafts;
+}
+
+/**
+ * Expand the terms on a note, when expansion is configured.
+ *
+ * Never throws. A model that falls over during expansion must not cost the user
+ * a transcribed page: the draft survives with the failure recorded on it, and
+ * the preview says why there are no explanations.
+ */
+async function expandDraft(
+  pages: PageDraft[],
+  options: CollectOptions,
+): Promise<{ expansions: Expansion[]; expansionError: string | null }> {
+  if (!options.expansion) return { expansions: [], expansionError: null };
+
+  // Failed pages are excluded. Degenerate output is exactly the material that
+  // would produce nonsense terms and waste a search query on each.
+  const notes = pages.filter((p) => p.ok).map((p) => p.markdown).join('\n\n').trim();
+  if (notes.length === 0) return { expansions: [], expansionError: null };
+
+  const { model, samples, agreementThreshold, maxTermsPerNote, research } = options.expansion;
+
+  try {
+    const terms = await extractTerms({
+      notes,
+      course: options.course,
+      model,
+      limit: maxTermsPerNote ?? 12,
+    });
+    if (terms.length === 0) return { expansions: [], expansionError: null };
+
+    const expansions = await expandTerms(terms, {
+      notes,
+      course: options.course,
+      model,
+      samples,
+      agreementThreshold,
+      research,
+    });
+    return { expansions, expansionError: null };
+  } catch (error) {
+    return { expansions: [], expansionError: (error as Error).message };
+  }
 }
 
 /**
@@ -185,6 +257,21 @@ export function renderNote(draft: Draft, attachmentsPath: string): string {
     }
 
     lines.push(`![[${attachmentsPath}/${page.imageFilename}]]`, '');
+  }
+
+  // Explanations go last, after every page and image, because they are the part
+  // the student did not write and should read as commentary on the note rather
+  // than as part of it.
+  // Tolerant of an absent list: this renders into the vault, and a crash here
+  // would lose a whole note over a field that carries no meaning of its own.
+  if ((draft.expansions ?? []).length > 0) {
+    lines.push(renderExpansions(draft.expansions));
+  } else if (draft.expansionError) {
+    lines.push(
+      '> [!info] Explanations were not generated',
+      `> ${draft.expansionError}`,
+      '',
+    );
   }
 
   return lines.join('\n');

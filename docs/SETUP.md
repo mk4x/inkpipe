@@ -266,7 +266,24 @@ To set it up you need a Google Programmable Search Engine, configured to search
 the entire web, plus its engine id and an API key. The engine id goes in `cx`
 here. **The API key does not go in this file**, because this file holds vault
 paths and course names and is the one people paste into an issue when asking for
-help. It lives beside the keystore.
+help.
+
+The key lives in `secrets.json` beside the config, mode 0600, written through
+`POST /api/research/key`. That endpoint is write only: the status endpoint
+reports whether a key is set and how many queries are left today, and never
+returns the key itself.
+
+Three files sit beside each other in the config directory:
+
+| file | holds | if you lose it |
+|---|---|---|
+| `config.json` | everything above | rerun setup |
+| `keys.json` | device keys | restore from the recovery phrase |
+| `secrets.json` | the search API key | reissue it in Google's console |
+| `research.json` | cached snippets and today's query count | nothing, it refills |
+
+Status reports what is missing rather than just that research is off, so a
+half-finished setup says which step is outstanding.
 
 The free tier is 100 queries a day. `maxQueriesPerDay` refuses to search past
 that rather than silently reverting to unsourced expansion, and the term cache

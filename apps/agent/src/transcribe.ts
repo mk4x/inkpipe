@@ -140,3 +140,58 @@ export function ollamaModel(options: {
     }
   };
 }
+
+/**
+ * The same, without an image, for expansion (ADR 0003).
+ *
+ * A separate function rather than an optional image argument, because it is a
+ * separate model. Text-only inference is far cheaper than vision, so a 9 GB
+ * text model and a 6 GB vision model coexist on a 16 GB card as long as they
+ * run sequentially, which they do.
+ *
+ * Temperature is per call rather than fixed: expansion samples at 0.7 to
+ * measure consistency and judges at 0, and collapsing that to one value would
+ * make the consistency signal measure nothing.
+ */
+export function ollamaTextModel(options: {
+  model: string;
+  host?: string;
+  numCtx?: number;
+  timeoutMs?: number;
+  numPredict?: number;
+}) {
+  const host = options.host ?? 'http://127.0.0.1:11434';
+  const numCtx = options.numCtx ?? 4096;
+  const timeoutMs = options.timeoutMs ?? 180_000;
+  // Short on purpose. Every prompt in the expansion chain asks for either two
+  // sentences or a single word, so a large budget only buys rambling.
+  const numPredict = options.numPredict ?? 320;
+
+  return async (prompt: string, callOptions?: { temperature?: number }): Promise<string> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${host}/api/generate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: options.model,
+          prompt,
+          stream: false,
+          options: {
+            temperature: callOptions?.temperature ?? 0,
+            num_predict: numPredict,
+            num_ctx: numCtx,
+          },
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`ollama returned ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      }
+      return ((await response.json()) as { response?: string }).response ?? '';
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}

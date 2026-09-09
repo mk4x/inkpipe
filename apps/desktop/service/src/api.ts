@@ -12,7 +12,10 @@ import { randomUUID, randomBytes, timingSafeEqual } from 'node:crypto';
 import { InkpipeClient, ApiError } from '@inkpipe/client';
 import { toBase64Url } from '@inkpipe/crypto';
 import { collectDrafts, renderNote, type Draft } from '../../../agent/src/pipeline.ts';
-import { ollamaModel } from '../../../agent/src/transcribe.ts';
+import { ollamaModel, ollamaTextModel } from '../../../agent/src/transcribe.ts';
+import type { ExpansionOptions } from '../../../agent/src/pipeline.ts';
+import { setSearchApiKey, hasSearchApiKey } from './secrets.ts';
+import { buildResearch, researchBlocker } from './research.ts';
 import { writeNote, push as pushVault, isDirty, isGitRepo, VaultError } from '../../../agent/src/vault.ts';
 import {
   loadConfig, saveConfig, configExists, glossaryFor, addGlossaryTerms,
@@ -33,8 +36,15 @@ import { fileURLToPath } from 'node:url';
 export interface ServiceOptions {
   configPath?: string;
   keystorePath?: string;
+  secretsPath?: string;
+  researchPath?: string;
   /** Injected in tests so no real model is needed. */
   modelFactory?: (config: ConfigType) => (prompt: string, image: Uint8Array) => Promise<string>;
+  /** The expansion model, which is a text model and a different one. Injected
+   *  separately so a test can exercise expansion without a GPU. */
+  textModelFactory?: (config: ConfigType) => (
+    prompt: string, options?: { temperature?: number },
+  ) => Promise<string>;
 }
 
 export interface ServiceHandle {
@@ -84,6 +94,37 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
       baseUrl: config.serverUrl,
       credentials: { deviceId: config.deviceId, ed25519PrivateKey: keys.identity.privateKey },
     });
+
+  /**
+   * Assemble expansion, or undefined when it is switched off.
+   *
+   * Research is nested inside it rather than beside it: checking explanations
+   * against sources is meaningless when there are no explanations, so research
+   * without expansion is a configuration that cannot do anything.
+   */
+  const expansionFor = (config: ConfigType): ExpansionOptions | undefined => {
+    if (!config.expansion.enabled) return undefined;
+
+    const model = options.textModelFactory
+      ? options.textModelFactory(config)
+      : ollamaTextModel({
+          model: config.expansion.model,
+          host: config.model.host,
+          numCtx: config.model.numCtx,
+          timeoutMs: config.model.timeoutMs,
+        });
+
+    return {
+      model,
+      samples: config.expansion.samples,
+      agreementThreshold: config.expansion.agreementThreshold,
+      maxTermsPerNote: config.expansion.maxTermsPerNote,
+      research: buildResearch(config, {
+        secretsPath: options.secretsPath,
+        researchPath: options.researchPath,
+      }) ?? undefined,
+    };
+  };
 
   // --- auth --------------------------------------------------------------
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -137,7 +178,38 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
       drafts: drafts.length,
       refreshing,
       lastError,
+      expansion: {
+        enabled: config.expansion.enabled,
+        model: config.expansion.model,
+      },
+      research: {
+        enabled: config.research.enabled,
+        // Says what is missing rather than just that it is off, so the setup
+        // screen can point at the step instead of the user guessing.
+        blocker: researchBlocker(config, options.secretsPath),
+        hasApiKey: hasSearchApiKey(options.secretsPath),
+        queriesRemaining: buildResearch(config, {
+          secretsPath: options.secretsPath,
+          researchPath: options.researchPath,
+        })?.remaining() ?? null,
+      },
     };
+  });
+
+  // --- research ----------------------------------------------------------
+  /**
+   * Save the search API key.
+   *
+   * Its own endpoint, and write only. The key never travels back to the UI:
+   * status reports whether one is set, never what it is.
+   */
+  app.post<{ Body: { apiKey?: unknown } }>('/api/research/key', async (request, reply) => {
+    const apiKey = request.body?.apiKey;
+    if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+      return reply.code(400).send({ error: 'invalid', message: 'apiKey must be a non-empty string' });
+    }
+    setSearchApiKey(apiKey, options.secretsPath);
+    return reply.send({ saved: true });
   });
 
   // --- setup -------------------------------------------------------------
@@ -411,6 +483,7 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
         glossary: glossaryFor(config, config.defaultCourse),
         formatting: config.formatting,
         model,
+        expansion: expansionFor(config),
       });
       return reply.send({ drafts: drafts.length });
     } catch (error) {
@@ -438,6 +511,18 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
         // travels to the UI as a data URL rather than a file path.
         imageDataUrl: `data:image/webp;base64,${Buffer.from(page.vaultImage).toString('base64')}`,
       })),
+      // The preview needs the confidence and the reason, not just the text:
+      // decision 20 says added content is always distinguishable from what the
+      // student wrote, and a disputed entry is the one worth looking at.
+      expansions: draft.expansions.map((expansion) => ({
+        term: expansion.term,
+        text: expansion.text,
+        confidence: expansion.confidence,
+        reason: expansion.reason,
+        agreement: expansion.agreement,
+        sources: expansion.sources.map((source) => ({ title: source.title, url: source.url })),
+      })),
+      expansionError: draft.expansionError,
     })),
   }));
 
