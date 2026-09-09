@@ -8,6 +8,9 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
+echo "pre-push: em dash checker self-test"
+bash scripts/check-em-dashes.sh --self-test || exit 1
+
 echo "pre-push: em dash check"
 bash scripts/check-em-dashes.sh || exit 1
 
