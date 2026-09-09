@@ -1,0 +1,80 @@
+{
+  "page": "page-f-formal-languages",
+  "model": "qwen2.5:14b",
+  "terms": [
+    "Micro syntax",
+    "epsilon",
+    "Kleene star",
+    "language",
+    "set",
+    "alphabet",
+    "ASCII",
+    "nums"
+  ],
+  "before": [
+    {
+      "term": "Micro syntax",
+      "text": "Micro syntax refers to the smallest units of a programming language, such as keywords (e.g., if, for, pass) and tokens (e.g., numbers), which are used to construct statements and expressions in the language.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "epsilon",
+      "text": "Epsilon ($\\epsilon$) represents the empty string, which is a string with zero characters. In the context of formal language theory, it is an element of the Kleene star closure $\\Sigma^*$ and is significant in defining certain operations and grammar rules.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "Kleene star",
+      "text": "The Kleene star of a set $\\Sigma$, denoted $\\Sigma^*$, is the set of all possible strings including the empty string that can be formed from the elements of $\\Sigma$, including the empty string $\\epsilon$.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "language",
+      "text": "",
+      "confidence": "refused",
+      "reason": "the model said it does not know this term",
+      "agreement": null,
+      "sources": []
+    },
+    {
+      "term": "set",
+      "text": "A set, in the context of the notes provided, is a collection of distinct elements, in this case, strings of characters from the alphabet $\\Sigma$. The notes do not provide additional details about the set beyond this basic definition in relation to formal language theory.",
+      "confidence": "low",
+      "reason": "the model only sometimes claimed to know this",
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "alphabet",
+      "text": "The alphabet in the context of formal languages and compiler construction, denoted as $\\Sigma$, is the set of all possible positive characters, which can include letters, digits, and other symbols, but not the empty string $\\epsilon$.",
+      "confidence": "high",
+      "reason": null,
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "ASCII",
+      "text": "ASCII stands for American Standard Code for Information Interchange. It is a character encoding standard that uses numbers to represent characters, but the notes do not provide further details about ASCII beyond this definition.",
+      "confidence": "low",
+      "reason": "the model only sometimes claimed to know this",
+      "agreement": 1,
+      "sources": []
+    },
+    {
+      "term": "nums",
+      "text": "",
+      "confidence": "refused",
+      "reason": "the model said it does not know this term",
+      "agreement": null,
+      "sources": []
+    }
+  ]
+}

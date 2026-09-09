@@ -124,9 +124,76 @@ export function extractPrompt(notes: string, course?: string, limit = 12): strin
     'want explained later. Prefer terms written as bare keywords with no',
     'explanation, since those are the ones that will mean nothing in a month.',
     '',
-    'Copy each term exactly as it is written in the notes.',
+    // Measured on corpus page F: three of eight extracted "terms" were
+    // instructions off the page ("Remove redundancy", "Avoid division"). They
+    // are correctly refused later, but each one costs a model round and a
+    // search query, so they are worth excluding here.
+    'A term must be the NAME OF A CONCEPT: a noun or noun phrase.',
+    'Do not list instructions, advice, or actions. "Remove redundancy" and',
+    '"Avoid division" are not terms. "Kleene star" and "register allocation" are.',
+    '',
+    // Also measured on page F: the page reads "Kleeny star", and copying that
+    // verbatim would search for a word that does not exist. Handwriting is
+    // misread and students misspell things, so a bounded correction is allowed.
+    'Copy each term as it is written in the notes, EXCEPT that if the notes',
+    'misspell a standard term you should write the standard spelling.',
+    'Correct spelling only. Never replace a term with a different one.',
+    '',
     'One term per line. No numbering, no bullets, no commentary.',
   ].join('\n');
+}
+
+/** Levenshtein distance, capped: anything past the cap is not a spelling fix. */
+function editDistance(a: string, b: string, cap: number): number {
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
+      best = Math.min(best, current[j]);
+    }
+    if (best > cap) return cap + 1;
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/**
+ * Is this term on the page, allowing for a corrected spelling?
+ *
+ * Exact substring first, which is the common case and cheap. Failing that, the
+ * term is compared against every same-length window of the page, and accepted
+ * when it is within a small edit distance of one.
+ *
+ * The bound is what keeps the guard meaningful. "Kleeny star" to "Kleene star"
+ * is one character and is exactly the case this exists for. "Kleene star" to
+ * "the Vandermeer register pass" is not close to anything, so an invented term
+ * still cannot get through by being called a correction.
+ */
+function appearsOnPage(term: string, haystack: string): boolean {
+  if (haystack.includes(term)) return true;
+
+  // One edit per eight characters, and NO budget below eight, so a short term
+  // must match exactly.
+  //
+  // The minimum matters more than the ratio. "epsilon" and "upsilon" are one
+  // edit apart and are different Greek letters, so any budget at all on a seven
+  // character term lets a correction change the meaning. Longer terms are safe
+  // to correct because a single edit cannot turn one concept into another:
+  // "Kleeny star" to "Kleene star" is one edit in eleven characters.
+  const cap = Math.floor(term.length / 8);
+  if (cap === 0) return false;
+
+  for (let start = 0; start + term.length - cap <= haystack.length; start++) {
+    for (let width = term.length - cap; width <= term.length + cap; width++) {
+      if (start + width > haystack.length) continue;
+      if (editDistance(term, haystack.slice(start, start + width), cap) <= cap) return true;
+    }
+  }
+  return false;
 }
 
 /** Normalised for comparison: case, spacing and surrounding punctuation. */
@@ -155,8 +222,9 @@ export function parseTerms(raw: string, notes: string, limit: number): string[] 
 
     const key = normalise(term);
     if (seen.has(key)) continue;
-    // The guard that matters: it has to be on the page.
-    if (!haystack.includes(key)) continue;
+    // The guard that matters: it has to be on the page, give or take a
+    // corrected spelling.
+    if (!appearsOnPage(key, haystack)) continue;
 
     seen.add(key);
     out.push(term);

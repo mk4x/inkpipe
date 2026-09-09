@@ -77,6 +77,42 @@ describe('parseTerms', () => {
   });
 });
 
+describe('corrected spellings, bounded', () => {
+  // Measured on corpus page F: the page reads "Kleeny star". Copied verbatim
+  // that searches for a word that does not exist, so a bounded correction is
+  // allowed. The bound is what stops it becoming a licence to invent.
+  const MISSPELLED = [
+    '# Formal Languages',
+    '- Kleeny star: zero or more',
+    '- epsilon is the empty word',
+  ].join('\n');
+
+  test('a one character correction is accepted', () => {
+    assert.deepEqual(parseTerms('Kleene star', MISSPELLED, 12), ['Kleene star']);
+  });
+
+  test('the page spelling is still accepted', () => {
+    assert.deepEqual(parseTerms('Kleeny star', MISSPELLED, 12), ['Kleeny star']);
+  });
+
+  test('a different concept is not smuggled in as a correction', () => {
+    assert.deepEqual(parseTerms('the Vandermeer register pass', MISSPELLED, 12), []);
+    assert.deepEqual(parseTerms('pumping lemma', MISSPELLED, 12), []);
+  });
+
+  test('a short term gets no budget at all, so it cannot drift into another word', () => {
+    // "epsilon" and "upsilon" are ONE edit apart and are different Greek
+    // letters. Any budget on a seven character term lets a correction change
+    // the meaning, so below eight characters the match must be exact.
+    assert.deepEqual(parseTerms('upsilon', MISSPELLED, 12), []);
+    assert.deepEqual(parseTerms('epsilon', MISSPELLED, 12), ['epsilon']);
+  });
+
+  test('a term that is nowhere near anything on the page is refused', () => {
+    assert.deepEqual(parseTerms('quantum chromodynamics', MISSPELLED, 12), []);
+  });
+});
+
 describe('extractTerms', () => {
   test('asks for terms and filters the answer', async () => {
     const prompts: string[] = [];
@@ -109,7 +145,21 @@ describe('the extraction prompt', () => {
   test('asks for bare keywords, which are the ones worth expanding', () => {
     const prompt = extractPrompt(NOTES, 'Compiler Construction', 5);
     assert.match(prompt, /bare keywords/);
-    assert.match(prompt, /Copy each term exactly as it is written/);
     assert.match(prompt, /up to 5/);
+  });
+
+  test('asks for concepts, not instructions', () => {
+    // Corpus page F extracted "Remove redundancy" and "Avoid division", which
+    // are advice written on the page rather than anything to look up.
+    const prompt = extractPrompt(NOTES);
+    assert.match(prompt, /NAME OF A CONCEPT/);
+    assert.match(prompt, /Do not list instructions/);
+  });
+
+  test('allows a corrected spelling and nothing more', () => {
+    const prompt = extractPrompt(NOTES);
+    assert.match(prompt, /misspell/);
+    assert.match(prompt, /Correct spelling only/);
+    assert.match(prompt, /Never replace a term with a different one/);
   });
 });
