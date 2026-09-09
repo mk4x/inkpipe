@@ -1,8 +1,12 @@
 # VPS setup
 
-**Status:** the scripts exist and the server runs. `ops/bootstrap-vps.sh` has
-been syntax checked and dry-run, but has **not yet been executed against a real
-VPS**, so treat the first run as the real test and use `--dry-run` first.
+**Status:** run for real. `ops/bootstrap-vps.sh` was executed against a fresh
+Ubuntu 24.04 Hetzner box on 2026-09-09 and worked on the first attempt, with a
+full round trip verified afterwards: phone upload over the public internet,
+desktop collect, transcribe, commit.
+
+Use `--dry-run` first anyway. It changes nothing and shows exactly what it will
+do.
 
 Managed by systemd rather than PM2: a self-hoster then needs no global npm
 install, and systemd can sandbox the process (see the unit in
@@ -103,6 +107,10 @@ sudo apt-get install -y nodejs git
 node -v    # must be 24 or newer
 ```
 
+Ubuntu 24.04 ships Node 22, which is **not** enough: `node:sqlite` and native
+TypeScript both need 24. The bootstrap script checks and refuses to continue on
+anything older, so this step is not optional.
+
 Node 24 is a hard requirement, not a preference: the server uses `node:sqlite`
 and runs TypeScript directly, so there is no build step and no native toolchain.
 The bootstrap script checks the version and refuses to continue on anything
@@ -145,6 +153,14 @@ sudo git clone https://github.com/mk4x/inkpipe.git /var/www/inkpipe
 cd /var/www/inkpipe
 sudo npm ci --omit=dev
 ```
+
+Run exactly that. Do **not** add `--workspaces=false` thinking it will skip the
+phone and desktop apps: it also skips linking `@inkpipe/protocol` and friends,
+and the server then fails to start with `ERR_MODULE_NOT_FOUND`.
+
+It pulls about 476 MB, because the workspace root installs every workspace's
+dependencies and the phone app brings Expo with it. That is wasteful on a server
+that needs none of it, and worth fixing later, but it is not harmful.
 
 There is no build step. The server runs TypeScript directly on Node 24, and uses
 `node:sqlite`, so there is no native toolchain to install. The checkout is owned
