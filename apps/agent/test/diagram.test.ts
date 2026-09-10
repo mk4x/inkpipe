@@ -19,7 +19,7 @@ const H = 2000;
 const answer = (diagrams: unknown[]) => JSON.stringify({ diagrams });
 
 describe('a good box', () => {
-  test('becomes pixels', () => {
+  test('becomes a full width band around the diagram', () => {
     const found = parseDiagrams(
       answer([{ caption: 'network tiers', x: 0.1, y: 0.2, w: 0.5, h: 0.3 }]),
       W, H,
@@ -27,7 +27,12 @@ describe('a good box', () => {
     assert.equal(found.length, 1);
     assert.deepEqual(
       { left: found[0].left, top: found[0].top, width: found[0].width, height: found[0].height },
-      { left: 160, top: 400, width: 800, height: 600 },
+      // The model box is 0.1,0.2 by 0.5,0.3. The vertical band comes from the
+      // model and gains PAD on each side; the width comes from the page.
+      // Measured on the diagram test page, the right hand edge is where a 7B
+      // is consistently wrong, and on lined notes a drawing occupies the
+      // writing area anyway.
+      { left: 0, top: 280, width: 1600, height: 840 },
     );
     assert.equal(found[0].caption, 'network tiers');
   });
@@ -48,9 +53,18 @@ describe('boxes that are refused', () => {
     assert.deepEqual(parseDiagrams('{"diagrams":[]}', W, H), []);
   });
 
-  test('a box running off the edge was invented', () => {
-    assert.deepEqual(parseDiagrams(answer([{ x: 0.8, y: 0.1, w: 0.5, h: 0.3 }]), W, H), []);
+  test('a box STARTING off the edge was invented', () => {
     assert.deepEqual(parseDiagrams(answer([{ x: -0.1, y: 0.1, w: 0.3, h: 0.3 }]), W, H), []);
+    assert.deepEqual(parseDiagrams(answer([{ x: 1.2, y: 0.1, w: 0.3, h: 0.3 }]), W, H), []);
+  });
+
+  test('a box that OVERRUNS the edge is clamped, not dropped', () => {
+    // Measured on the diagram test page: the model gave y 0.8 with h 0.3 for
+    // the third drawing, a correct position with a sloppy height. Refusing it
+    // lost a diagram that was really there.
+    const found = parseDiagrams(answer([{ caption: 'third', x: 0.2, y: 0.8, w: 0.6, h: 0.3 }]), W, H);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].top + found[0].height, H, 'clamped to the bottom edge');
   });
 
   test('a box covering the page is refused, since the page is already embedded', () => {
@@ -162,5 +176,28 @@ describe('answer shapes the model actually produces', () => {
 
   test('an object is still understood', () => {
     assert.equal(parseDiagrams(answer([{ x: 0.1, y: 0.1, w: 0.4, h: 0.4 }]), W, H).length, 1);
+  });
+});
+
+describe('the crop takes the page width', () => {
+  // Measured across several runs on the diagram test page: vertical placement
+  // is reliable and the right hand edge is consistently short. At 0.03 padding
+  // the mind map lost its right hand node, at 0.06 the flow chart still lost
+  // "Succeed". Taking the width from the page fixes it outright.
+  test('a narrow box still becomes a full width band', () => {
+    const found = parseDiagrams(answer([{ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }]), W, H);
+    assert.equal(found[0].left, 0);
+    assert.equal(found[0].width, W);
+  });
+
+  test('the vertical band still comes from the model', () => {
+    const top = parseDiagrams(answer([{ x: 0.1, y: 0.05, w: 0.3, h: 0.2 }]), W, H)[0];
+    const bottom = parseDiagrams(answer([{ x: 0.1, y: 0.7, w: 0.3, h: 0.2 }]), W, H)[0];
+    assert.ok(top.top < bottom.top, 'a diagram lower on the page crops lower');
+  });
+
+  test('a sliver is still refused, since width is judged before the page width applies', () => {
+    // Otherwise every heading becomes a full width crop.
+    assert.deepEqual(parseDiagrams(answer([{ x: 0.1, y: 0.4, w: 0.02, h: 0.4 }]), W, H), []);
   });
 });

@@ -64,6 +64,14 @@ const MAX_FRACTION = 0.85;
 
 const MAX_DIAGRAMS = 4;
 
+/** Margin added on every side, as a fraction of the page.
+ *
+ *  A 7B places a box roughly right and systematically too small. Measured on
+ *  the diagram test page: at 0.03 the mind map still lost the right hand node,
+ *  so it is 0.06. Clipping part of a drawing makes the picture wrong, while an
+ *  over-wide crop costs a strip of blank paper. */
+const PAD = 0.06;
+
 /**
  * Parse the model's answer into regions in pixels.
  *
@@ -115,28 +123,57 @@ export function parseDiagrams(
 
     if (![x, y, w, h].every((n) => Number.isFinite(n))) continue;
 
-    // Inside the page. A box that runs off the edge was invented.
-    if (x < 0 || y < 0 || w <= 0 || h <= 0) continue;
-    if (x + w > 1.001 || y + h > 1.001) continue;
+    // Where the box STARTS has to be on the page. A box beginning off the edge
+    // was invented and nothing can be salvaged from it.
+    if (x < 0 || y < 0 || x >= 1 || y >= 1 || w <= 0 || h <= 0) continue;
 
-    const area = w * h;
+    // Where it ENDS is clamped rather than refused. Measured on the diagram
+    // test page: the model returned y 0.8 with h 0.3 for the third drawing,
+    // which is a correct position and a sloppy height, and refusing it lost a
+    // diagram that was really there. Overshooting the edge of a page is the
+    // ordinary imprecision of a 7B, not a sign the box is fictional.
+    const clampedWidth = Math.min(w, 1 - x);
+    const clampedHeight = Math.min(h, 1 - y);
+
+    // Judged on the box the MODEL gave, before any padding. Padding a sliver
+    // would turn a heading into a diagram, which is the thing these checks
+    // exist to prevent.
+    const area = clampedWidth * clampedHeight;
     if (area < MIN_FRACTION || area > MAX_FRACTION) continue;
+    if (clampedWidth < 0.05 || clampedHeight < 0.03) continue;
 
-    // A diagram is not a hairline. Either dimension being tiny means a rule or
-    // a line of text was picked up.
-    if (w < 0.05 || h < 0.03) continue;
+    // The crop takes its VERTICAL band from the model and its WIDTH from the
+    // page.
+    //
+    // Measured on the diagram test page across several runs: vertical placement
+    // is reliable, and the right hand edge is consistently short. At 0.03
+    // padding the mind map lost its right hand node; at 0.06 the flow chart
+    // still lost "Succeed" and "get rich". Inflating the padding further just
+    // approaches the full width by a slower route.
+    //
+    // On lined notes a drawing occupies the writing area, so the page is a
+    // better source for the horizontal extent than a 7B is. What the model is
+    // genuinely good at here is saying WHERE DOWN THE PAGE the drawing sits,
+    // and that is the part worth keeping.
+    //
+    // The cost is a side by side pair of diagrams merging into one crop, which
+    // is rare in handwritten notes and still shows both drawings.
+    const cropX = 0;
+    const cropW = 1;
+    const cropY = Math.max(0, y - PAD);
+    const cropH = Math.min(clampedHeight + (y - cropY) + PAD, 1 - cropY);
 
-    const left = Math.round(x * imageWidth);
-    const top = Math.round(y * imageHeight);
-    const width = Math.min(Math.round(w * imageWidth), imageWidth - left);
-    const height = Math.min(Math.round(h * imageHeight), imageHeight - top);
-    if (width < 32 || height < 32) continue;
+    const left = Math.round(cropX * imageWidth);
+    const top = Math.round(cropY * imageHeight);
+    const pixelWidth = Math.min(Math.round(cropW * imageWidth), imageWidth - left);
+    const pixelHeight = Math.min(Math.round(cropH * imageHeight), imageHeight - top);
+    if (pixelWidth < 32 || pixelHeight < 32) continue;
 
     out.push({
       left,
       top,
-      width,
-      height,
+      width: pixelWidth,
+      height: pixelHeight,
       caption: cleanCaption(String(raw.caption ?? 'diagram')),
     });
 
