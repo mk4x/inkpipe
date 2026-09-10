@@ -102,6 +102,12 @@ export const Config = z.object({
     maxTermsPerNote: z.number().int().min(1).max(50).default(12),
   }).default({}),
 
+  /** Cut hand-drawn diagrams out of each page and embed the crops.
+   *
+   *  Off by default: it costs a second vision pass per page, and most pages of
+   *  written notes contain no diagram at all. */
+  detectDiagrams: z.boolean().default(false),
+
   // --- research (ADR 0004) ---
   /** Checking expansions against web search snippets.
    *

@@ -138,6 +138,8 @@ account was created instead.
     "maxTermsPerNote": 12
   },
 
+  "detectDiagrams": false,
+
   "research": {
     "enabled": false,
     "provider": "searxng",
@@ -387,3 +389,24 @@ Uninstalling removes the application and the window profile. It deliberately
 leaves `config.json`, `keys.json` and `secrets.json` alone, because `keys.json`
 is derived from your recovery phrase and losing it makes any page still waiting
 on the server permanently unreadable.
+
+**`detectDiagrams`** cuts hand-drawn diagrams out of a page and embeds the crops
+in the note above the full photograph. Off by default.
+
+A drawing survives transcription badly. It becomes a paragraph describing
+arrows, which is longer than the drawing and worse than it. A crop is exactly
+what was on the paper, costs no model tokens once cut, and cannot be wrong.
+
+It costs a second vision pass per page, which is why it is off: most pages of
+written notes contain no diagram at all.
+
+Every box the model returns is validated against the real image and dropped if
+it runs off the edge, covers most of the page, is a sliver, or repeats a box
+already taken. That bias is deliberate. Missing a diagram costs a crop; a wrong
+crop puts a meaningless fragment in your vault and makes the note worse than
+having nothing.
+
+**It is unproven on real diagrams.** Every corpus page so far is written notes
+and dense mathematics, so `qwen2.5vl:7b` correctly returns nothing on all of
+them, and there has been no page to confirm it finds one. Photograph a page with
+a drawn diagram before trusting it.

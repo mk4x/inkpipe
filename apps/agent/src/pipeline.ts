@@ -6,7 +6,7 @@
 // without a human.
 
 import { open } from '@inkpipe/crypto';
-import { prepForModel, prepForVault } from '@inkpipe/imaging';
+import { prepForModel, prepForVault, cropRegion } from '@inkpipe/imaging';
 import type { InkpipeClient } from '@inkpipe/client';
 import type { BlobMeta, PendingBlobsResponse } from '@inkpipe/protocol';
 import { transcribePage, type TranscribeOptions, type PromptVariant } from './transcribe.ts';
@@ -20,6 +20,7 @@ import type { ModelFn } from './evidence.ts';
 import { checkArithmetic, renderArithmeticFlags, type ArithmeticProblem } from './arithmetic.ts';
 import { cleanNotes } from './clean.ts';
 import { completeOpenLists } from './complete.ts';
+import { detectDiagrams, type Diagram } from './diagram.ts';
 
 export interface PageDraft {
   blobId: string;
@@ -44,6 +45,12 @@ export interface PageDraft {
   cleanMarkdown: string | null;
   /** Why there is no clean version, when there is none. */
   cleanReason: string | null;
+  /** Hand-drawn diagrams cut out of the photograph.
+   *
+   *  A drawing survives transcription badly: it becomes a paragraph about
+   *  arrows, longer than the drawing and worse than it. The crop is exactly
+   *  what was on the paper and cannot be wrong. */
+  diagrams: Array<{ filename: string; caption: string; bytes: Uint8Array }>;
 }
 
 export interface Draft {
@@ -87,6 +94,9 @@ export interface CollectOptions extends TranscribeOptions {
    *  metadata; the slice takes it as a parameter. */
   rotate?: number;
   expansion?: ExpansionOptions;
+  /** Cut hand-drawn diagrams out of each page. Off by default: it costs a
+   *  second vision pass per page and most pages have no diagram. */
+  detectDiagrams?: boolean;
   /** Called as each stage starts and finishes.
    *
    *  A page can take a minute and a note with expansion several, during which
@@ -204,6 +214,7 @@ export async function collectDrafts(options: CollectOptions): Promise<Draft[]> {
         formatterChanges: formatted.changes,
         cleanMarkdown: null,
         cleanReason: null,
+        diagrams: await cropDiagrams(original, forModel, meta, sessionId, options),
       });
     }
 
@@ -235,6 +246,92 @@ export async function collectDrafts(options: CollectOptions): Promise<Draft[]> {
 
   report({ stage: 'done', message: `${drafts.length} note(s) ready to review` });
   return drafts;
+}
+
+/** Dimensions of an encoded image, or null when it cannot be read. */
+async function imageSize(bytes: Uint8Array): Promise<{ width: number; height: number } | null> {
+  const sharp = (await import("sharp")).default;
+  const meta = await sharp(bytes).metadata();
+  return meta.width && meta.height ? { width: meta.width, height: meta.height } : null;
+}
+
+/**
+ * Move a box from the prepared image frame into the original one.
+ *
+ * The model sees a downscaled copy, so its coordinates are in that frame. The
+ * crop comes from the original so the diagram keeps the resolution the camera
+ * captured. Clamped, because a rounding error at the edge is an exception from
+ * sharp rather than a slightly wrong crop.
+ */
+async function scaleToOriginal(
+  box: Diagram,
+  prepared: { width: number; height: number },
+  original: Uint8Array,
+): Promise<{ left: number; top: number; width: number; height: number } | null> {
+  const size = await imageSize(original);
+  if (!size) return null;
+
+  const scaleX = size.width / prepared.width;
+  const scaleY = size.height / prepared.height;
+
+  const left = Math.max(0, Math.round(box.left * scaleX));
+  const top = Math.max(0, Math.round(box.top * scaleY));
+  const width = Math.min(Math.round(box.width * scaleX), size.width - left);
+  const height = Math.min(Math.round(box.height * scaleY), size.height - top);
+
+  return width > 16 && height > 16 ? { left, top, width, height } : null;
+}
+
+/**
+ * Cut any hand-drawn diagrams out of a page.
+ *
+ * Opt in, because it costs a second vision pass per page and most pages have no
+ * diagram on them. Never throws: the transcription has already succeeded and a
+ * diagram pass falling over must not take the page with it.
+ */
+async function cropDiagrams(
+  original: Uint8Array,
+  prepared: Uint8Array,
+  meta: BlobMeta,
+  sessionId: string,
+  options: CollectOptions,
+): Promise<PageDraft['diagrams']> {
+  if (!options.detectDiagrams) return [];
+
+  try {
+    const size = await imageSize(prepared);
+    if (!size) return [];
+
+    options.onProgress?.({
+      stage: 'transcribe',
+      message: 'looking for diagrams to cut out',
+      page: meta.seq + 1,
+    });
+
+    // Detection runs on the PREPARED image because that is what the model
+    // sees, so its coordinates are in that frame. The crop is taken from the
+    // ORIGINAL, so the diagram keeps the resolution the camera captured
+    // rather than the downscale the model needed.
+    const found = await detectDiagrams(prepared, {
+      model: options.model,
+      imageWidth: size.width,
+      imageHeight: size.height,
+    });
+
+    const out: PageDraft['diagrams'] = [];
+    for (const [index, diagram] of found.entries()) {
+      const scaled = await scaleToOriginal(diagram, size, original);
+      if (!scaled) continue;
+      out.push({
+        filename: `${sessionId}-p${String(meta.seq).padStart(2, '0')}-d${index}.webp`,
+        caption: diagram.caption,
+        bytes: await cropRegion(original, scaled, { rotate: options.rotate }),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -427,6 +524,13 @@ export function renderNote(draft: Draft, attachmentsPath: string): string {
         ...page.sanitiserChanges.map((c) => `> - ${c}`),
         '',
       );
+    }
+
+    // Diagram crops come BEFORE the full page image. They are the part worth
+    // looking at, and burying them under the whole photograph would mean
+    // scrolling past the thing that was cut out in order to find it.
+    for (const diagram of page.diagrams ?? []) {
+      lines.push(`![[${attachmentsPath}/${diagram.filename}]]`, `*${diagram.caption}*`, '');
     }
 
     lines.push(`![[${attachmentsPath}/${page.imageFilename}]]`, '');

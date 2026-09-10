@@ -545,6 +545,7 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
         formatting: config.formatting,
         model,
         expansion: expansionFor(config),
+        detectDiagrams: config.detectDiagrams,
         onProgress: (event) => {
           progress.push({ at: new Date().toISOString(), ...event });
           if (progress.length > PROGRESS_KEPT) progress = progress.slice(-PROGRESS_KEPT);
@@ -660,7 +661,13 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
           course: edited.course,
           title: edited.suggestedTitle,
           markdown: renderNote(edited, config.vault.attachmentsPath),
-          images: edited.pages.map((p) => ({ filename: p.imageFilename, bytes: p.vaultImage })),
+          // Diagram crops are attachments too, so the wikilinks in the note
+          // resolve. A note pointing at an image that was never written is
+          // worse than a note with no image.
+          images: edited.pages.flatMap((p) => [
+            { filename: p.imageFilename, bytes: p.vaultImage },
+            ...(p.diagrams ?? []).map((d) => ({ filename: d.filename, bytes: d.bytes })),
+          ]),
         },
       );
 
