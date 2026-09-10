@@ -45,6 +45,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
 Name: "startup"; Description: "Start inkpipe when I sign in"; GroupDescription: "Startup:"; Flags: unchecked
 
+[InstallDelete]
+; Vite names its bundles by content hash, so an upgrade writes the new files
+; beside the old ones and never removes them. Four stale bundles had already
+; accumulated across a day of reinstalls. index.html always points at the
+; current pair, so this was dead weight rather than a fault, but it grows
+; forever and a stale bundle served after a cache slip is a bad hour.
+Type: filesandordirs; Name: "{app}\apps\desktop\ui\dist"
+
 [Files]
 ; The staged tree: source, production node_modules, and the Node runtime.
 Source: "..\..\..\build\stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
