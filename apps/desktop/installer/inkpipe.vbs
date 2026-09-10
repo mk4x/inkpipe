@@ -48,10 +48,22 @@ If code <> 0 Then
     On Error Resume Next
     details = fso.OpenTextFile(logPath, 1).ReadAll()
     On Error Goto 0
-    If Len(details) > 1500 Then details = Right(details, 1500)
   End If
 
-  MsgBox "inkpipe stopped with code " & code & "." & vbCrLf & vbCrLf & _
-         details & vbCrLf & vbCrLf & _
-         "The full log is at:" & vbCrLf & logPath, vbCritical, "inkpipe"
+  ' A non-zero exit is not the same as a crash.
+  '
+  ' Installing an upgrade kills the running copy so it can replace the files,
+  ' and so does Task Manager, and so does signing out. All three exit non-zero
+  ' with a log that shows a perfectly normal start, and reporting those as a
+  ' crash is how you teach someone to ignore the dialog. It happened the first
+  ' time: an upgrade killed a running copy and the owner was told it crashed.
+  '
+  ' A real failure leaves something in the log. Nothing in the log means
+  ' something outside the app ended it, and that needs no dialog at all.
+  If InStr(details, "Error") > 0 Or InStr(details, "Exception") > 0 Then
+    If Len(details) > 1500 Then details = Right(details, 1500)
+    MsgBox "inkpipe stopped with an error." & vbCrLf & vbCrLf & _
+           details & vbCrLf & vbCrLf & _
+           "The full log is at:" & vbCrLf & logPath, vbCritical, "inkpipe"
+  End If
 End If
