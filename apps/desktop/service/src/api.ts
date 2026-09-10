@@ -169,11 +169,24 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
       isDirty(config.vault.root).then((d) => !d).catch(() => false),
     ]);
 
-    let pending = 0;
+    // Three counts, not one, because one count was actively misleading.
+    //
+    // A page stays on the server until the note built from it is approved, so
+    // anything already collected was counted TWICE: once as "waiting on the
+    // server" and again as "ready to review". That left the owner having to
+    // remember how many there were last time in order to work out what was
+    // new, which is precisely the arithmetic a status bar exists to save you.
+    let onServer = 0;
+    let notYetTranscribed = 0;
     if (serverReachable) {
       try {
-        const listed = await clientFor(config, keys).get<{ blobs: unknown[] }>('/blobs');
-        pending = listed.blobs.length;
+        const listed = await clientFor(config, keys)
+          .get<{ blobs: Array<{ blobId: string }> }>('/blobs');
+        onServer = listed.blobs.length;
+
+        // Already pulled into a draft, so not new even though it is still there.
+        const collected = new Set(drafts.flatMap((d) => d.blobIds));
+        notYetTranscribed = listed.blobs.filter((b) => !collected.has(b.blobId)).length;
       } catch { /* reported via serverReachable */ }
     }
 
@@ -186,7 +199,19 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
       vaultRoot: config.vault.root,
       vaultOk,
       vaultClean,
-      pending,
+      /** Photographs uploaded but not yet turned into a draft. This is the
+       *  number the collect button acts on. */
+      notYetTranscribed,
+      /** Notes built and waiting for the human gate. */
+      readyToCheck: drafts.length,
+      /** Everything still held by the server, which is the two above combined
+       *  once collection has run. Kept for diagnostics, not for the bar. */
+      onServer,
+      // Retained with its ORIGINAL meaning, which is everything the server
+      // still holds. Aliasing it to notYetTranscribed broke the guarantee that
+      // a failed approval does not lose the page, because a page already in a
+      // draft is not new but is very much still there.
+      pending: onServer,
       drafts: drafts.length,
       refreshing,
       lastError,

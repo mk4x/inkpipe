@@ -40,6 +40,12 @@ export default function App() {
   return <Dashboard status={status} onChange={reload} />;
 }
 
+/** One count, in words, that says nothing when there is nothing to say. */
+function Count({ n, noun, verb }: { n: number; noun: string; verb: string }) {
+  if (n === 0) return null;
+  return <span><strong>{n}</strong> {noun}{n === 1 ? '' : 's'} {verb}</span>;
+}
+
 function Splash({ error }: { error: string | null }) {
   return (
     <main className="centre">
@@ -274,8 +280,15 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
       </header>
 
       <section className="bar">
-        <span><strong>{status.pending ?? 0}</strong> waiting on the server</span>
-        <span><strong>{drafts.length}</strong> ready to review</span>
+        {/* Plain language, and no double counting. A photograph stays on the
+            server until its note is approved, so the old bar showed the same
+            page under both headings and you had to remember last time's number
+            to work out what was new. */}
+        <Count n={status.notYetTranscribed ?? status.pending ?? 0} noun="photo" verb="not read yet" />
+        <Count n={drafts.length} noun="note" verb="waiting for you to check" />
+        {(status.notYetTranscribed ?? 0) === 0 && drafts.length === 0 && (
+          <span className="muted">nothing to do</span>
+        )}
         <div className="spacer" />
         <button onClick={() => setShowDevices(true)} disabled={busy !== null}>Devices</button>
         <button onClick={() => guarded('pair', async () => {
@@ -286,10 +299,12 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
           const r = await api.refresh();
           await loadDrafts();
           setMessage(`${r.drafts} note${r.drafts === 1 ? '' : 's'} ready`);
-        })} disabled={busy !== null || !status.serverReachable || (status.pending ?? 0) === 0}>
+        })} disabled={busy !== null || !status.serverReachable || (status.notYetTranscribed ?? status.pending ?? 0) === 0}>
           {busy === 'refresh'
-            ? 'Transcribing...'
-            : `Collect (${status.pending ?? 0})`}
+            ? 'Reading...'
+            : (status.notYetTranscribed ?? status.pending ?? 0) === 0
+              ? 'Nothing new to read'
+              : `Read ${status.notYetTranscribed ?? 0} new photo${(status.notYetTranscribed ?? 0) === 1 ? '' : 's'}`}
         </button>
         <button onClick={() => guarded('push', async () => {
           const r = await api.push();

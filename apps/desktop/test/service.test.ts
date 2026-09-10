@@ -306,8 +306,13 @@ describe('the full journey', () => {
     assert.equal(result.body.error, 'dirty_tree');
 
     // And the blobs were NOT acked, so nothing is lost.
-    const status = await ui<{ pending: number }>('GET', '/api/status');
-    assert.equal(status.body.pending, 1);
+    // Still on the server, so nothing was lost. And NOT counted as new, since
+    // it is already sitting in a draft: those are different questions and the
+    // status bar answers them separately.
+    const status = await ui<{ pending: number; onServer: number; notYetTranscribed: number }>('GET', '/api/status');
+    assert.equal(status.body.onServer, 1, 'the page is still on the server');
+    assert.equal(status.body.pending, 1, 'the original field keeps its original meaning');
+    assert.equal(status.body.notYetTranscribed, 0, 'but it is not a new photo, it is already collected');
   });
 
   test('a multi-page session becomes one draft', async () => {

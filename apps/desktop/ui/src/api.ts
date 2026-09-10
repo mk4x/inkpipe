@@ -48,6 +48,12 @@ export interface Status {
   vaultRoot?: string;
   vaultOk?: boolean;
   vaultClean?: boolean;
+  /** Uploaded but not yet transcribed. What the collect button acts on. */
+  notYetTranscribed?: number;
+  /** Notes built and waiting for you to check them. */
+  readyToCheck?: number;
+  /** Everything the server still holds. */
+  onServer?: number;
   pending?: number;
   drafts?: number;
   refreshing?: boolean;

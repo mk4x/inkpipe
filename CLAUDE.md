@@ -10,7 +10,7 @@ Working end to end. Phone captures, the VPS relays ciphertext, the desktop
 transcribes locally and builds a draft, and the preview writes to the vault.
 `docs/SPEC.md` and `docs/SETUP.md` exist and are kept in step by CI.
 
-Five ADRs are accepted. A Windows installer is built by `npm run installer`.
+Six ADRs are accepted. **Read ADR 0006 first if you are touching the pipeline**: it records that the output is the page tidied, not the page plus an appendix of explanations, which is the opposite of what ADRs 0003 and 0004 were built for. A Windows installer is built by `npm run installer`.
 ADR 0004 was the only one taken without a spike behind it; it has since been
 measured at zero regressions over twelve terms. Its `research` feature still
 defaults to off, because it needs a search instance that nobody has by default.
@@ -140,7 +140,7 @@ before fixing it.
 ```
 apps/phone          Expo dev build, TypeScript
 apps/desktop        Node service, React UI, launcher and installer (ADR 0002, 0005)
-apps/agent          transcription, formatting, sanitising, expansion, search
+apps/agent          transcription, cleaning, arithmetic, diagrams, expansion, search
 apps/server         Fastify, SQLite, Node 24
 packages/protocol   zod wire schemas, shared by all three surfaces
 packages/crypto     TypeScript crypto wrappers
