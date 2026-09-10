@@ -62,6 +62,11 @@ const url = `http://127.0.0.1:${port}/#token=${token}`;
 
 console.log(`inkpipe listening on 127.0.0.1:${port}`);
 
+// With --no-window there is no other way to reach it: the token is generated
+// per launch and lives only in this process, so not printing it made the flag
+// useless for anything except checking that the service starts.
+if (!openWindow) console.log(`open: ${url}`);
+
 let window: ChildProcess | null = null;
 
 if (openWindow) {

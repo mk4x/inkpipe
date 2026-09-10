@@ -168,7 +168,7 @@ function Devices({ onClose }: { onClose: () => void }) {
       const result = await api.revokeDevice(device.id);
       setMessage(
         result.deletedBlobs > 0
-          ? `Revoked ${result.label}, and discarded ${result.deletedBlobs} page(s) it had uploaded.`
+          ? `Revoked ${result.label}, and discarded ${result.deletedBlobs} page${result.deletedBlobs === 1 ? '' : 's'} it had uploaded.`
           : `Revoked ${result.label}.`,
       );
       setConfirming(null);
@@ -195,11 +195,15 @@ function Devices({ onClose }: { onClose: () => void }) {
           <div key={d.id} className="device">
             <div>
               <strong>{d.label}</strong>
-              <span className="muted"> {d.role === 'pc' ? 'desktop' : 'phone'}</span>
+              {/* Only when it adds something. A device labelled "phone" whose
+                  role is phone reads as "phone phone". */}
+              {d.label.toLowerCase() !== (d.role === 'pc' ? 'desktop' : 'phone') && (
+                <span className="muted"> {d.role === 'pc' ? 'desktop' : 'phone'}</span>
+              )}
               {d.id === self && <span className="muted"> this one</span>}
               <div className="muted">
                 last seen {ago(d.lastSeenAt)}, paired {ago(d.createdAt)}
-                {d.pendingBlobs > 0 && `, ${d.pendingBlobs} page(s) on the server`}
+                {d.pendingBlobs > 0 && `, ${d.pendingBlobs} page${d.pendingBlobs === 1 ? '' : 's'} on the server`}
               </div>
             </div>
             <div className="spacer" />
@@ -212,7 +216,7 @@ function Devices({ onClose }: { onClose: () => void }) {
                         not been collected, so the count is in the button. */}
                     <button className="danger" disabled={busy} onClick={() => void revoke(d)}>
                       {d.pendingBlobs > 0
-                        ? `Revoke and discard ${d.pendingBlobs} page(s)`
+                        ? `Revoke and discard ${d.pendingBlobs} page${d.pendingBlobs === 1 ? '' : 's'}`
                         : 'Really revoke'}
                     </button>
                     <button disabled={busy} onClick={() => setConfirming(null)}>Cancel</button>
@@ -271,6 +275,7 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
     <main>
       <header>
         <h1>inkpipe</h1>
+        <div className="spacer" />
         <div className="pills">
           <Pill ok={status.serverReachable} label="server" />
           <Pill ok={status.ollamaReachable} label={status.model ?? 'model'} />
@@ -299,7 +304,7 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
           const r = await api.refresh();
           await loadDrafts();
           setMessage(`${r.drafts} note${r.drafts === 1 ? '' : 's'} ready`);
-        })} disabled={busy !== null || !status.serverReachable || (status.notYetTranscribed ?? status.pending ?? 0) === 0}>
+        })} className="primary" disabled={busy !== null || !status.serverReachable || (status.notYetTranscribed ?? status.pending ?? 0) === 0}>
           {busy === 'refresh'
             ? 'Reading...'
             : (status.notYetTranscribed ?? status.pending ?? 0) === 0
@@ -354,10 +359,10 @@ function DraftList({ drafts, onOpen }: { drafts: Draft[]; onOpen: (id: string) =
   if (drafts.length === 0) {
     return (
       <section className="empty">
-        <p>Nothing to review.</p>
+        <p>Nothing to review</p>
         <p className="muted">
-          Photograph some pages on your phone, hit upload, then press
-          {' '}<em>Collect and transcribe</em>.
+          Photograph a page on your phone and upload it. The button above will
+          say how many are waiting.
         </p>
       </section>
     );
