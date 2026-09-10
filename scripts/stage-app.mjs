@@ -16,9 +16,10 @@
 
 import { execFileSync } from 'node:child_process';
 import {
-  mkdirSync, rmSync, cpSync, existsSync, writeFileSync, readFileSync, createWriteStream,
+  mkdirSync, rmSync, cpSync, existsSync, writeFileSync, readFileSync, readdirSync,
+  createWriteStream,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 
@@ -75,6 +76,62 @@ for (const manifest of MANIFESTS) {
 }
 console.log(`copied ${SOURCE.length} source directories`);
 
+// --- workspace imports become relative paths --------------------------------
+//
+// Node refuses to strip TypeScript types for any file under node_modules, and
+// that is not overridable by a flag. In the repository this never bites: npm
+// symlinks each workspace into node_modules, Node resolves the symlink to its
+// real path in packages/, and the real path is not under node_modules.
+//
+// The installer copies rather than links, so every symlink lands as a real
+// directory and the whole application dies on its first import with
+// ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING. It did exactly that.
+//
+// So the shipped tree does not rely on workspace resolution at all. Bare
+// "@inkpipe/x" specifiers are rewritten to relative paths into packages/, and
+// the staged manifest declares no workspaces, so npm installs only the external
+// dependencies. Checked below rather than assumed.
+
+/** Where each workspace specifier actually lives, from its exports map. */
+const WORKSPACE = new Map(Object.entries({
+  '@inkpipe/crypto': 'packages/crypto/src/index.ts',
+  '@inkpipe/crypto/recovery': 'packages/crypto/src/recovery.ts',
+  '@inkpipe/protocol': 'packages/protocol/src/index.ts',
+  '@inkpipe/client': 'packages/client/src/index.ts',
+  '@inkpipe/quality': 'packages/quality/src/index.ts',
+  '@inkpipe/imaging': 'packages/imaging/src/index.ts',
+}));
+
+function sourceFilesUnder(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...sourceFilesUnder(full));
+    else if (/\.tsx?$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+let rewritten = 0;
+for (const file of sourceFilesUnder(STAGE)) {
+  const before = readFileSync(file, 'utf8');
+  const after = before.replace(
+    /(['"])(@inkpipe\/[a-z/-]+)\1/g,
+    (whole, quote, specifier) => {
+      const target = WORKSPACE.get(specifier);
+      if (!target) throw new Error(`unmapped workspace import ${specifier} in ${file}`);
+      let rel = relative(dirname(file), join(STAGE, target)).replace(/\\/g, '/');
+      if (!rel.startsWith('.')) rel = `./${rel}`;
+      return `${quote}${rel}${quote}`;
+    },
+  );
+  if (after !== before) {
+    writeFileSync(file, after);
+    rewritten++;
+  }
+}
+console.log(`rewrote workspace imports in ${rewritten} files`);
+
 // --- dependencies ----------------------------------------------------------
 
 // The root manifest, minus everything only needed to build. The interface is
@@ -88,7 +145,9 @@ writeFileSync(join(STAGE, 'package.json'), `${JSON.stringify({
   version: root.version,
   private: true,
   type: 'module',
-  workspaces: ['apps/*', 'packages/*'],
+  // Deliberately no "workspaces". See the rewrite above: declaring them
+  // recreates node_modules/@inkpipe, and the installer would copy TypeScript
+  // under node_modules where Node refuses to strip its types.
   dependencies: runtimeOnly,
 }, null, 2)}\n`);
 
@@ -145,6 +204,53 @@ if (!skipNode) {
     throw new Error('node.exe is not where it was expected after unpacking');
   }
   console.log(`bundled Node ${NODE_VERSION}`);
+}
+
+// --- the checks that would have caught the broken installer -----------------
+//
+// The first build installed cleanly, created its shortcuts, and then died on
+// its first import. Everything about it looked right from the outside, which is
+// exactly why these are assertions rather than a careful reading.
+
+const problems = [];
+
+// 1. No TypeScript under node_modules. Node cannot strip it and says so at
+//    runtime, which is the failure that shipped.
+const modules = join(STAGE, 'node_modules', '@inkpipe');
+if (existsSync(modules)) {
+  problems.push('node_modules/@inkpipe exists, so workspace TypeScript will ship under node_modules');
+}
+
+// 2. No bare workspace specifier survived the rewrite.
+for (const file of sourceFilesUnder(STAGE).filter((f) => !f.includes('node_modules'))) {
+  if (/['"]@inkpipe\//.test(readFileSync(file, 'utf8'))) {
+    problems.push(`${relative(STAGE, file)} still imports a bare @inkpipe specifier`);
+  }
+}
+
+// 3. The rewrite actually did something. A silent no-op here would leave the
+//    same bug with a reassuring log line above it.
+if (rewritten === 0) problems.push('no files were rewritten, which cannot be right');
+
+// 4. It starts. The only check that would have caught this without knowing
+//    what to look for, so it runs last and it runs for real.
+if (!skipNode) {
+  console.log('\nchecking that the staged application actually starts');
+  try {
+    execFileSync(join(STAGE, 'runtime', 'node.exe'), [
+      '--experimental-strip-types',
+      '--input-type=module',
+      '-e', "await import('./apps/desktop/service/src/api.ts'); console.log('imports fine');",
+    ], { cwd: STAGE, stdio: 'inherit', timeout: 120_000 });
+  } catch (error) {
+    problems.push(`the staged application does not start: ${error.message.split('\n')[0]}`);
+  }
+}
+
+if (problems.length > 0) {
+  console.error('\nSTAGE IS BROKEN:');
+  for (const problem of problems) console.error(`  - ${problem}`);
+  process.exit(1);
 }
 
 console.log('\nstage complete:', STAGE);
