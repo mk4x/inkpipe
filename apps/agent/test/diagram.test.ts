@@ -104,6 +104,22 @@ describe('duplicates and limits', () => {
     assert.equal(found.length, 1);
   });
 
+  test('an overlapping box is MERGED, so no detected drawing is lost', () => {
+    // Measured on corpus page I: the model's box for the second drawing is
+    // tall enough to swallow the third. Dropping the third meant a diagram the
+    // model had correctly found vanished because of how generous the box above
+    // it happened to be. That is a loss, not a duplicate.
+    const found = parseDiagrams(answer([
+      { caption: 'flow', x: 0.1, y: 0.5, w: 0.5, h: 0.4 },
+      { caption: 'graph', x: 0.1, y: 0.8, w: 0.5, h: 0.2 },
+    ]), W, H);
+
+    assert.equal(found.length, 1);
+    assert.equal(found[0].top + found[0].height, H, 'the crop reaches the lower drawing');
+    assert.match(found[0].caption, /flow/);
+    assert.match(found[0].caption, /graph/, 'the caption names both');
+  });
+
   test('two separate diagrams are both kept', () => {
     const found = parseDiagrams(answer([
       { caption: 'top', x: 0.05, y: 0.05, w: 0.4, h: 0.2 },

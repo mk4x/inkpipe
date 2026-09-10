@@ -205,19 +205,45 @@ function dropOverlapping(diagrams: Diagram[]): Diagram[] {
   const kept: Diagram[] = [];
 
   for (const candidate of diagrams) {
-    const duplicate = kept.some((existing) => {
+    const existing = kept.find((box) => {
       const overlapWidth = Math.max(0,
-        Math.min(existing.left + existing.width, candidate.left + candidate.width)
-        - Math.max(existing.left, candidate.left));
+        Math.min(box.left + box.width, candidate.left + candidate.width)
+        - Math.max(box.left, candidate.left));
       const overlapHeight = Math.max(0,
-        Math.min(existing.top + existing.height, candidate.top + candidate.height)
-        - Math.max(existing.top, candidate.top));
+        Math.min(box.top + box.height, candidate.top + candidate.height)
+        - Math.max(box.top, candidate.top));
       const overlap = overlapWidth * overlapHeight;
-      const smaller = Math.min(existing.width * existing.height, candidate.width * candidate.height);
+      const smaller = Math.min(box.width * box.height, candidate.width * candidate.height);
       return smaller > 0 && overlap / smaller > 0.5;
     });
 
-    if (!duplicate) kept.push(candidate);
+    if (!existing) {
+      kept.push(candidate);
+      continue;
+    }
+
+    // MERGED, not discarded.
+    //
+    // Measured on corpus page I: the model's box for the second drawing is tall
+    // enough to swallow the third, so they overlap by more than half. The old
+    // behaviour dropped the third silently, which meant a diagram the model had
+    // correctly found could vanish depending on how generous the box above it
+    // happened to be. That is not a duplicate, it is a loss.
+    //
+    // Growing the kept box to cover both guarantees the crop contains every
+    // drawing that was detected. One crop holding two diagrams is a worse
+    // picture; a missing diagram is a worse note.
+    const left = Math.min(existing.left, candidate.left);
+    const top = Math.min(existing.top, candidate.top);
+    existing.width = Math.max(existing.left + existing.width, candidate.left + candidate.width) - left;
+    existing.height = Math.max(existing.top + existing.height, candidate.top + candidate.height) - top;
+    existing.left = left;
+    existing.top = top;
+
+    // Both names, so the caption does not claim to be only one of them.
+    if (!existing.caption.includes(candidate.caption)) {
+      existing.caption = `${existing.caption}, ${candidate.caption}`.slice(0, 60);
+    }
   }
 
   return kept;
