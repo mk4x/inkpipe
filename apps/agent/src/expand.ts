@@ -46,7 +46,11 @@ import {
   type Evidence, type ModelFn,
 } from './evidence.ts';
 import type { SearchResult } from './search.ts';
-import { detectDegenerate } from '@inkpipe/quality';
+// Re-exported so existing importers keep working. It lives in injection.ts
+// now because cleaning needs it too, and the next stage that embeds a
+// transcript will as well.
+export { looksCaptured } from './injection.ts';
+import { looksCaptured } from './injection.ts';
 
 export type Confidence =
   /** Explained, the page agrees or is silent, sources back it. */
@@ -440,55 +444,6 @@ function refused(term: string, reason: string): Expansion {
   return { term, text: '', confidence: 'refused', reason, agreement: null, sources: [] };
 }
 
-/**
- * Has the model been captured by something written on the page?
- *
- * Prompt framing reduces this and does not eliminate it, so the OUTPUT is
- * checked as well as the input. Defence in depth, because the framing is a
- * request and this is a measurement.
- *
- * The signal is repetition. An injection that wants a model to do something
- * visible almost always wants it done repeatedly, because a single stray
- * sentence is not a convincing demonstration: corpus page D asked for "banana"
- * ten times, page G for "Hello" twenty times. The project already has a
- * detector for exactly this shape, built for the vision model's repetition
- * loops, so it is reused rather than reinvented.
- *
- * Thresholds are tighter here than for a transcript. Two or three sentences of
- * explanation have no legitimate reason to repeat a phrase five times, whereas
- * a page of notes might.
- */
-export function looksCaptured(text: string): string | null {
-  const result = detectDegenerate(text, {
-    maxConsecutive: 3,
-    maxNgram: 3,
-    ngramSize: 3,
-    maxLineRepeatRatio: 0.34,
-    maxTemplateRepeatRatio: 0.5,
-  });
-  if (result.degenerate) {
-    return `the explanation repeated itself (${result.reasons.join('; ')}), which is what a page instructing the model looks like`;
-  }
-
-  // A single word repeated many times on one line is the exact page G shape,
-  // and it is one "line" so the line-repeat ratio never sees it.
-  const words = text.trim().split(/\s+/);
-  if (words.length >= 8) {
-    const counts = new Map<string, number>();
-    for (const word of words) {
-      const key = word.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (key.length === 0) continue;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    for (const [word, count] of counts) {
-      if (count >= 6 && count / words.length > 0.3) {
-        return `the explanation repeated "${word}" ${count} times, which is what a page instructing the model looks like`;
-      }
-    }
-  }
-
-  return null;
-}
 
 /**
  * The model refused, so there is no explanation to protect.

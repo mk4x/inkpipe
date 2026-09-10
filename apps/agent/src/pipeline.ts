@@ -114,6 +114,12 @@ export interface ProgressEvent {
   totalPages?: number;
 }
 
+/** "1 page", "2 pages". A status line that reads "1 page(s)" is a status line
+ *  nobody proofread. */
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
 /** Group pending blobs into capture sessions (decision 9: one note per session). */
 export function groupBySession(blobs: BlobMeta[]): Map<string, BlobMeta[]> {
   const sessions = new Map<string, BlobMeta[]>();
@@ -155,7 +161,7 @@ export async function collectDrafts(options: CollectOptions): Promise<Draft[]> {
   const drafts: Draft[] = [];
   report({
     stage: 'collect',
-    message: `${pending.blobs.length} page(s) in ${sessions.size} session(s)`,
+    message: `${plural(pending.blobs.length, 'page')} in ${plural(sessions.size, 'session')}`,
   });
 
   for (const [sessionId, metas] of sessions) {
@@ -214,7 +220,7 @@ export async function collectDrafts(options: CollectOptions): Promise<Draft[]> {
         formatterChanges: formatted.changes,
         cleanMarkdown: null,
         cleanReason: null,
-        diagrams: await cropDiagrams(original, forModel, meta, sessionId, options),
+        diagrams: await cropDiagrams(original, forModel, meta, sessionId, metas.length, options),
       });
     }
 
@@ -294,6 +300,7 @@ async function cropDiagrams(
   prepared: Uint8Array,
   meta: BlobMeta,
   sessionId: string,
+  totalPages: number,
   options: CollectOptions,
 ): Promise<PageDraft['diagrams']> {
   if (!options.detectDiagrams) return [];
@@ -306,6 +313,7 @@ async function cropDiagrams(
       stage: 'transcribe',
       message: 'looking for diagrams to cut out',
       page: meta.seq + 1,
+      totalPages,
     });
 
     // Detection runs on the PREPARED image because that is what the model

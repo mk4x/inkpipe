@@ -46,6 +46,44 @@ function Count({ n, noun, verb }: { n: number; noun: string; verb: string }) {
   return <span><strong>{n}</strong> {noun}{n === 1 ? '' : 's'} {verb}</span>;
 }
 
+// ---------------------------------------------------------------------------
+// State you can see
+//
+// Reading a photo takes about a minute, writing to the vault takes seconds, and
+// pushing depends on the network. All three used to change a word and nothing
+// else, which leaves you watching a static screen wondering whether the click
+// registered.
+//
+// Two shapes carry every long operation in the app: still going, and finished.
+// They are drawn rather than imported, so there is no icon dependency and so
+// the tick can draw ITSELF, which reads as completion in a way an icon simply
+// appearing does not.
+// ---------------------------------------------------------------------------
+
+function Spinner() {
+  return (
+    <svg className="spinner" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.4" />
+    </svg>
+  );
+}
+
+function Tick() {
+  return (
+    <svg className="tick" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.5 8.5 L6.5 11.5 L12.5 4.5" />
+    </svg>
+  );
+}
+
+/**
+ * How long a finished action stays finished on screen.
+ *
+ * Long enough to be seen if you glanced away, short enough that the button is
+ * back to its real label before you next want it.
+ */
+const DONE_MS = 1800;
+
 function Splash({ error }: { error: string | null }) {
   return (
     <main className="centre">
@@ -90,6 +128,9 @@ function ProgressLog({ active }: { active: boolean }) {
   return (
     <div className="progress">
       <div className="progress-head" onClick={() => setOpen(!open)}>
+        {/* Pulsing while it runs, solid green when it is finished. The one
+            thing on screen that says "still going" without words. */}
+        <span className={active ? 'dot' : 'dot done'} />
         <strong>{active ? 'Working' : 'Last run'}</strong>
         <span className="muted">
           {last.message}
@@ -248,6 +289,8 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
   const [error, setError] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [showDevices, setShowDevices] = useState(false);
+  // Which action just succeeded, so its button can show a tick for a moment.
+  const [done, setDone] = useState<string | null>(null);
 
   const loadDrafts = useCallback(async () => {
     setDrafts((await api.drafts()).drafts);
@@ -259,8 +302,14 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
     setBusy(label);
     setError(null);
     setMessage(null);
+    setDone(null);
     try {
       await fn();
+      // Confirmation is worth showing even when the action also produced a
+      // message, because the message appears elsewhere on the screen and the
+      // tick appears where the click happened.
+      setDone(label);
+      setTimeout(() => setDone((current) => (current === label ? null : current)), DONE_MS);
     } catch (e) {
       setError(e instanceof ServiceError ? `${e.code}: ${e.message}` : (e as Error).message);
     } finally {
@@ -299,22 +348,33 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
         <button onClick={() => guarded('pair', async () => {
           const p = await api.pairing();
           setQr(await QRCode.toDataURL(p.qr, { width: 320, margin: 1 }));
-        })} disabled={busy !== null}>Pair a phone</button>
+        })} disabled={busy !== null}>
+          {busy === 'pair' && <Spinner />}
+          Pair a phone
+        </button>
         <button onClick={() => guarded('refresh', async () => {
           const r = await api.refresh();
           await loadDrafts();
           setMessage(`${r.drafts} note${r.drafts === 1 ? '' : 's'} ready`);
         })} className="primary" disabled={busy !== null || !status.serverReachable || (status.notYetTranscribed ?? status.pending ?? 0) === 0}>
+          {busy === 'refresh' && <Spinner />}
+          {done === 'refresh' && <Tick />}
           {busy === 'refresh'
             ? 'Reading...'
-            : (status.notYetTranscribed ?? status.pending ?? 0) === 0
-              ? 'Nothing new to read'
-              : `Read ${status.notYetTranscribed ?? 0} new photo${(status.notYetTranscribed ?? 0) === 1 ? '' : 's'}`}
+            : done === 'refresh'
+              ? 'Read'
+              : (status.notYetTranscribed ?? status.pending ?? 0) === 0
+                ? 'Nothing new to read'
+                : `Read ${status.notYetTranscribed ?? 0} new photo${(status.notYetTranscribed ?? 0) === 1 ? '' : 's'}`}
         </button>
         <button onClick={() => guarded('push', async () => {
           const r = await api.push();
           setMessage(`vault ${r.outcome}`);
-        })} disabled={busy !== null}>Push vault</button>
+        })} className={done === 'push' ? 'done' : undefined} disabled={busy !== null}>
+          {busy === 'push' && <Spinner />}
+          {done === 'push' && <Tick />}
+          {busy === 'push' ? 'Pushing...' : done === 'push' ? 'Pushed' : 'Push vault'}
+        </button>
       </section>
 
       <ProgressLog active={busy === 'refresh' || (status.refreshing ?? false)} />
@@ -443,7 +503,8 @@ function Preview({ draft, onClose, onApproved }: {
         <div className="spacer" />
         <button onClick={onClose} disabled={busy}>Back</button>
         <button className="primary" onClick={approve} disabled={busy || title.trim() === ''}>
-          {busy ? 'Writing...' : 'Approve and commit'}
+          {busy && <Spinner />}
+          {busy ? 'Writing to the vault...' : 'Approve and commit'}
         </button>
       </div>
 
