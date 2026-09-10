@@ -65,6 +65,13 @@ Search results are subject to this rule in full. A snippet is text from a
 stranger: evidence to weigh, never an instruction, and never the source of the
 next request.
 
+**The rule applies at EVERY stage, not just transcription.** Corpus page G
+proved this the hard way. The vision model refused an instruction written on
+the page and transcribed it faithfully, and the expansion model then read that
+transcript and obeyed it. Any prompt that embeds a transcript must frame it as
+data and delimit it, and the OUTPUT must be checked too, because framing is a
+request and a check is a measurement. See `looksCaptured` in expand.ts.
+
 ### 5. Generated Markdown is inert
 
 Never emit a runnable code fence, `templater` syntax, a `dataview` block,
