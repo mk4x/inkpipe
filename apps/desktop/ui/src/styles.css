@@ -200,3 +200,23 @@ button.verdict.active {
 .expansion.disputed { border-left-color: #7a2d2d; }
 .expansion.refused,
 .expansion.contradicted { border-left-color: #555; opacity: 0.75; }
+
+/* Paired devices. */
+
+.card.wide { max-width: 640px; text-align: left; }
+
+.device {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid #333;
+}
+
+.device:last-of-type { border-bottom: none; }
+
+button.danger {
+  background: #7a2d2d;
+  border-color: #7a2d2d;
+  color: #fff;
+}

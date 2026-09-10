@@ -455,6 +455,54 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
     }
   });
 
+  // --- devices -----------------------------------------------------------
+  /**
+   * What is paired to this account.
+   *
+   * Pairing is easy to lose track of once it has been done more than once, and
+   * a device you cannot see is a device you cannot revoke.
+   */
+  app.get('/api/devices', async (_request, reply) => {
+    if (!state().configured) {
+      return reply.code(409).send({ error: 'not_configured', message: 'run setup first' });
+    }
+    const config = readConfig();
+    const keys = readKeys();
+    try {
+      const listed = await clientFor(config, keys).get<{
+        devices: unknown[];
+        self: string;
+      }>('/devices');
+      return reply.send(listed);
+    } catch (error) {
+      return reply.code(502).send({ error: 'devices_failed', message: (error as Error).message });
+    }
+  });
+
+  app.delete<{ Params: { deviceId: string } }>('/api/devices/:deviceId', async (request, reply) => {
+    if (!state().configured) {
+      return reply.code(409).send({ error: 'not_configured', message: 'run setup first' });
+    }
+    const config = readConfig();
+    const keys = readKeys();
+    try {
+      const result = await clientFor(config, keys).del<{
+        revoked: string; label: string; deletedBlobs: number;
+      }>(`/devices/${request.params.deviceId}`);
+      // A revoked phone's pages are gone, so any draft built from them is stale.
+      drafts = [];
+      return reply.send(result);
+    } catch (error) {
+      // The server refuses some revocations on purpose: revoking yourself, or
+      // the last desktop. Those are 409s worth passing through verbatim rather
+      // than flattening into "something went wrong".
+      if (error instanceof ApiError) {
+        return reply.code(error.status).send({ error: error.code, message: error.message });
+      }
+      return reply.code(502).send({ error: 'revoke_failed', message: (error as Error).message });
+    }
+  });
+
   // --- drafts ------------------------------------------------------------
   app.post('/api/refresh', async (_request, reply) => {
     if (!state().configured) {

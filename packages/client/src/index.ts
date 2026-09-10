@@ -101,4 +101,9 @@ export class InkpipeClient {
   post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>('POST', path, body ?? {});
   }
+
+  /** Revoking a device is the only DELETE in the protocol. */
+  del<T>(path: string): Promise<T> {
+    return this.request<T>('DELETE', path);
+  }
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { api, ServiceError, type Status, type Draft, type PageDraft } from './api.ts';
+import { api, ServiceError, type Status, type Draft, type PageDraft, type DeviceSummary } from './api.ts';
 import Wizard from './Wizard.tsx';
 
 export default function App() {
@@ -50,6 +50,122 @@ function Splash({ error }: { error: string | null }) {
 }
 
 // ---------------------------------------------------------------------------
+// Devices
+//
+// Pairing is easy to lose track of once it has happened more than once, and a
+// device you cannot see is a device you cannot revoke. Pairing again ADDS a
+// device rather than replacing one, which is not obvious and is why the pairing
+// dialog now says so.
+// ---------------------------------------------------------------------------
+
+/** "3 minutes ago", because an ISO timestamp answers the wrong question. */
+function ago(iso: string | null): string {
+  if (!iso) return 'never';
+  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 90) return 'just now';
+  const units: Array<[number, string]> = [
+    [60, 'minute'], [3600, 'hour'], [86400, 'day'], [604800, 'week'],
+  ];
+  let label = 'a long time';
+  for (const [size, name] of units) {
+    const n = Math.floor(seconds / size);
+    if (n >= 1 && n < 100) label = `${n} ${name}${n === 1 ? '' : 's'}`;
+  }
+  return `${label} ago`;
+}
+
+function Devices({ onClose }: { onClose: () => void }) {
+  const [devices, setDevices] = useState<DeviceSummary[] | null>(null);
+  const [self, setSelf] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const result = await api.devices();
+      setDevices(result.devices);
+      setSelf(result.self);
+    } catch (e) {
+      setError(e instanceof ServiceError ? `${e.code}: ${e.message}` : (e as Error).message);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function revoke(device: DeviceSummary) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.revokeDevice(device.id);
+      setMessage(
+        result.deletedBlobs > 0
+          ? `Revoked ${result.label}, and discarded ${result.deletedBlobs} page(s) it had uploaded.`
+          : `Revoked ${result.label}.`,
+      );
+      setConfirming(null);
+      await load();
+    } catch (e) {
+      setError(e instanceof ServiceError ? e.message : (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal" onClick={onClose}>
+      <div className="card wide" onClick={(e) => e.stopPropagation()}>
+        <h2>Paired devices</h2>
+
+        {error && <p className="bad">{error}</p>}
+        {message && <p className="good">{message}</p>}
+        {devices === null && !error && <p className="muted">asking the server...</p>}
+
+        {devices?.length === 0 && <p className="muted">Nothing is paired yet.</p>}
+
+        {devices?.map((d) => (
+          <div key={d.id} className="device">
+            <div>
+              <strong>{d.label}</strong>
+              <span className="muted"> {d.role === 'pc' ? 'desktop' : 'phone'}</span>
+              {d.id === self && <span className="muted"> this one</span>}
+              <div className="muted">
+                last seen {ago(d.lastSeenAt)}, paired {ago(d.createdAt)}
+                {d.pendingBlobs > 0 && `, ${d.pendingBlobs} page(s) on the server`}
+              </div>
+            </div>
+            <div className="spacer" />
+            {d.id === self
+              ? <span className="muted">cannot revoke itself</span>
+              : confirming === d.id
+                ? (
+                  <>
+                    {/* Revoking destroys anything that device uploaded and has
+                        not been collected, so the count is in the button. */}
+                    <button className="danger" disabled={busy} onClick={() => void revoke(d)}>
+                      {d.pendingBlobs > 0
+                        ? `Revoke and discard ${d.pendingBlobs} page(s)`
+                        : 'Really revoke'}
+                    </button>
+                    <button disabled={busy} onClick={() => setConfirming(null)}>Cancel</button>
+                  </>
+                )
+                : <button disabled={busy} onClick={() => setConfirming(d.id)}>Revoke</button>}
+          </div>
+        ))}
+
+        <p className="muted">
+          Revoking a device stops it uploading. On a phone you still have, use Unpair
+          in the app instead, which also clears its copy of the keys.
+        </p>
+        <button onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
 
@@ -60,6 +176,7 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
+  const [showDevices, setShowDevices] = useState(false);
 
   const loadDrafts = useCallback(async () => {
     setDrafts((await api.drafts()).drafts);
@@ -99,6 +216,7 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
         <span><strong>{status.pending ?? 0}</strong> waiting on the server</span>
         <span><strong>{drafts.length}</strong> ready to review</span>
         <div className="spacer" />
+        <button onClick={() => setShowDevices(true)} disabled={busy !== null}>Devices</button>
         <button onClick={() => guarded('pair', async () => {
           const p = await api.pairing();
           setQr(await QRCode.toDataURL(p.qr, { width: 320, margin: 1 }));
@@ -126,10 +244,16 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
             <h2>Scan with the inkpipe phone app</h2>
             <img src={qr} alt="pairing QR code" />
             <p className="muted">Valid for 5 minutes. Single use.</p>
+            <p className="muted">
+              Pairing again does not replace the old device. It adds one, so revoke
+              anything you no longer use from Devices.
+            </p>
             <button onClick={() => setQr(null)}>Close</button>
           </div>
         </div>
       )}
+
+      {showDevices && <Devices onClose={() => { setShowDevices(false); onChange(); }} />}
 
       {current
         ? <Preview draft={current} onClose={() => setOpen(null)} onApproved={async () => {

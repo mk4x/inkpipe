@@ -124,6 +124,10 @@ export function createServer(options: ServerOptions): FastifyInstance {
         reply.code(403).send({ error: 'forbidden', message: `this endpoint requires a ${role} device` });
         return;
       }
+      // Every authenticated request is a sign of life. Cheap, and it is what
+      // makes a device list worth reading: without it you cannot tell the phone
+      // in your pocket from one you paired once from a browser and forgot.
+      store.touchDevice(result.id, now().toISOString());
       request.device = result;
     };
   }
@@ -209,6 +213,60 @@ export function createServer(options: ServerOptions): FastifyInstance {
       x25519PublicKey: device.x25519PublicKey,
     });
   });
+
+  /**
+   * Every device on this account.
+   *
+   * Desktop only. A phone listing the account's devices would be a phone that
+   * can enumerate the desktop, and it has no reason to.
+   */
+  app.get('/devices', { preHandler: requireAuth('pc') }, async (request) => ({
+    devices: store.listDevices(request.device!.accountId),
+    self: request.device!.id,
+  }));
+
+  /**
+   * Revoke a device.
+   *
+   * Its pending pages go with it. They are useless once it is gone, since
+   * nothing will ever ack them, and they would sit against the account quota
+   * until the retention sweep. The count is returned so the caller can say what
+   * was discarded rather than destroying work quietly.
+   */
+  app.delete<{ Params: { deviceId: string } }>(
+    '/devices/:deviceId',
+    { preHandler: requireAuth('pc') },
+    async (request, reply) => {
+      const caller = request.device!;
+      const target = store.getDevice(request.params.deviceId);
+
+      if (!target || target.accountId !== caller.accountId) {
+        // Same answer for "does not exist" and "belongs to someone else", so
+        // this cannot be used to probe for device ids on other accounts.
+        return reply.code(404).send({ error: 'not_found', message: 'no such device' });
+      }
+
+      if (target.id === caller.id) {
+        return reply.code(409).send({
+          error: 'conflict',
+          message: 'a device cannot revoke itself. Use another desktop, or reset the server.',
+        });
+      }
+
+      // Revoking the last desktop strands every phone: nothing would be left
+      // that can decrypt a page, and the account could not be repaired from
+      // inside the app.
+      if (target.role === 'pc' && store.countPcs(caller.accountId) <= 1) {
+        return reply.code(409).send({
+          error: 'conflict',
+          message: 'this is the only desktop on the account, so revoking it would strand every phone',
+        });
+      }
+
+      const { deletedBlobs } = store.deleteDevice(target.id);
+      return reply.send({ revoked: target.id, label: target.label, deletedBlobs });
+    },
+  );
 
   app.post('/pair/complete', async (request, reply) => {
     const parsed = CompletePairingRequest.safeParse(request.body);

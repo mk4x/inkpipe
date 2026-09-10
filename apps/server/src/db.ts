@@ -21,6 +21,18 @@ export interface Device {
   label: string;
 }
 
+/** What a device list shows. Deliberately carries no key material: a public
+ *  key is not a secret, but printing one invites it into a screenshot and it
+ *  identifies the device across every account it has ever been on. */
+export interface DeviceSummary {
+  id: string;
+  role: 'phone' | 'pc';
+  label: string;
+  createdAt: string;
+  lastSeenAt: string | null;
+  pendingBlobs: number;
+}
+
 export interface BlobRow {
   blobId: string;
   accountId: string;
@@ -86,6 +98,15 @@ export class Store {
       CREATE INDEX IF NOT EXISTS blobs_by_account ON blobs(account_id, created_at);
       CREATE INDEX IF NOT EXISTS blobs_by_device  ON blobs(from_device_id);
     `);
+
+    // Added after the schema shipped, so it goes on separately. A device list
+    // without "when did this last do anything" tells you almost nothing about
+    // which entry is the phone in your pocket and which is the one you paired
+    // once from a browser and forgot.
+    const columns = this.db.prepare('PRAGMA table_info(devices)').all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === 'last_seen_at')) {
+      this.db.exec('ALTER TABLE devices ADD COLUMN last_seen_at TEXT');
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -156,6 +177,84 @@ export class Store {
 
   countDevices(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM devices').get() as { n: number }).n;
+  }
+
+  /**
+   * Every device on an account, with enough to decide whether to revoke one.
+   *
+   * The owner asked for this after losing track of what was paired, which is
+   * easy once pairing has happened twice and once from a browser. A device you
+   * cannot see is a device you cannot revoke.
+   */
+  listDevices(accountId: string): DeviceSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT d.id, d.role, d.label, d.created_at, d.last_seen_at,
+                (SELECT COUNT(*) FROM blobs b
+                  WHERE b.from_device_id = d.id) AS pending
+           FROM devices d
+          WHERE d.account_id = ?
+          ORDER BY d.created_at ASC`,
+      )
+      .all(accountId) as Array<Record<string, string | number | null>>;
+
+    return rows.map((row) => ({
+      id: String(row.id),
+      role: row.role as 'phone' | 'pc',
+      label: String(row.label),
+      createdAt: String(row.created_at),
+      lastSeenAt: row.last_seen_at === null || row.last_seen_at === undefined
+        ? null
+        : String(row.last_seen_at),
+      pendingBlobs: Number(row.pending ?? 0),
+    }));
+  }
+
+  /** Record that a device just made an authenticated request. */
+  touchDevice(id: string, now: string): void {
+    this.db.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').run(now, id);
+  }
+
+  /** How many desktops the account has. Revoking the last one strands it. */
+  countPcs(accountId: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM devices WHERE account_id = ? AND role = 'pc'")
+      .get(accountId) as { n: number };
+    return row.n;
+  }
+
+  /**
+   * Remove a device and everything it uploaded that nobody has collected.
+   *
+   * The blobs go because the schema points at the device, and because they are
+   * useless once it is gone: nothing will ever ack them, so they would sit
+   * against the account quota until the retention sweep.
+   *
+   * Returns how many pages were discarded, so the caller can say so rather than
+   * destroying work quietly.
+   */
+  deleteDevice(id: string): { deletedBlobs: number } {
+    const blobIds = this.db
+      .prepare('SELECT blob_id FROM blobs WHERE from_device_id = ?')
+      .all(id) as Array<{ blob_id: string }>;
+
+    // Ciphertext lives on disk, so removing the row is only half of it.
+    for (const { blob_id: blobId } of blobIds) {
+      const path = join(this.blobDir, blobId);
+      if (existsSync(path)) unlinkSync(path);
+    }
+
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('DELETE FROM blobs WHERE from_device_id = ?').run(id);
+      this.db.prepare('DELETE FROM devices WHERE id = ?').run(id);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+
+    return { deletedBlobs: blobIds.length };
   }
 
   // -------------------------------------------------------------------------

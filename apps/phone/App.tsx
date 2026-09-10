@@ -111,6 +111,15 @@ export default function App() {
   );
 }
 
+/** Bare hostname, so the pairing line reads as a place rather than a URL. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Pair
 // ---------------------------------------------------------------------------
@@ -377,6 +386,15 @@ function QueueScreen({ pairing, captures, onBack, onChanged, onUnpair }: {
       <Text style={styles.h1}>Queue</Text>
       <Text style={styles.muted}>
         {pending.length} waiting, {captures.length - pending.length} uploaded
+      </Text>
+
+      {/* What this phone is actually attached to.
+          Without it, "am I paired, and to what" cannot be answered from the
+          phone at all, which matters once pairing has happened more than once
+          or the server has moved. The device id is shortened because its only
+          use is matching a row in the desktop's Devices list. */}
+      <Text style={styles.muted}>
+        paired to {hostOf(pairing.serverUrl)} as {pairing.deviceId.slice(0, 8)}
       </Text>
       <Text style={warn ? styles.bad : styles.muted}>
         {(used / 1048576).toFixed(0)} MB of {(DEFAULT_RETENTION.bytes / 1073741824).toFixed(0)} GB used

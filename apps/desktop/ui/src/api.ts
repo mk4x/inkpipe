@@ -87,6 +87,16 @@ export interface Draft {
   expansionError?: string | null;
 }
 
+/** A paired device, as the server describes it. Carries no key material. */
+export interface DeviceSummary {
+  id: string;
+  role: 'phone' | 'pc';
+  label: string;
+  createdAt: string;
+  lastSeenAt: string | null;
+  pendingBlobs: number;
+}
+
 export interface OllamaStatus {
   host: string;
   running: boolean;
@@ -112,6 +122,9 @@ export const api = {
   setup: (body: unknown) =>
     call<{ deviceId: string; recoveryPhrase: string }>('POST', '/api/setup', body),
   pairing: () => call<{ qr: string; expiresAt: string }>('POST', '/api/pairing'),
+  devices: () => call<{ devices: DeviceSummary[]; self: string }>('GET', '/api/devices'),
+  revokeDevice: (id: string) =>
+    call<{ revoked: string; label: string; deletedBlobs: number }>('DELETE', `/api/devices/${id}`),
   refresh: () => call<{ drafts: number }>('POST', '/api/refresh'),
   drafts: () => call<{ drafts: Draft[] }>('GET', '/api/drafts'),
   approve: (sessionId: string, body: unknown) =>
