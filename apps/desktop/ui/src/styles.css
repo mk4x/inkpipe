@@ -658,3 +658,51 @@ button.done { background: var(--ok); color: #fff; }
   .progress-head .dot { animation: none; }
   button:active:not(:disabled) { transform: none; }
 }
+
+/* --- presentation ---------------------------------------------------------
+ * How things arrive and leave.
+ *
+ * On a phone a sheet rises from the bottom over a ground that dims and blurs,
+ * and a list row you press dims under your finger. Those two movements are
+ * most of what makes an interface feel like it was built rather than rendered,
+ * and neither costs anything.
+ *
+ * The curve throughout is cubic-bezier(0.32, 0.72, 0, 1), which is the iOS
+ * ease: quick to start, long to settle. Linear or ease-out both read as cheap
+ * next to it. */
+
+@keyframes dim { from { opacity: 0; } to { opacity: 1; } }
+
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+.modal { animation: dim 0.2s ease both; }
+.modal .card { animation: sheet-in 0.34s cubic-bezier(0.32, 0.72, 0, 1) both; }
+
+/* A row dims under the press rather than only on hover, which is what makes a
+   list feel like a list of buttons instead of a table. */
+.row { transition: background 0.15s ease, transform 0.06s ease; }
+.row:active { background: var(--separator); transform: scale(0.995); }
+
+/* Pills change when the service comes and goes, and a colour that snaps looks
+   like a rendering glitch rather than a status change. */
+.pill { transition: background 0.3s ease, color 0.3s ease; }
+
+/* The whole screen when it swaps between the list and the preview. */
+.preview, .empty { animation: rise 0.3s cubic-bezier(0.32, 0.72, 0, 1) both; }
+
+/* A stage that is currently running, in the log. Fades rather than jumping, so
+   the list does not flicker as lines arrive once a second. */
+.progress-line { animation: dim 0.2s ease both; }
+
+/* The tidied column arriving after the raw one, since it is produced later and
+   appearing instantly makes it look like it was always there. */
+.pane-body.three .column { animation: dim 0.3s ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .modal, .modal .card, .preview, .empty,
+  .progress-line, .pane-body.three .column { animation: none; }
+  .row:active { transform: none; }
+}

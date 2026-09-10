@@ -149,6 +149,10 @@ export function extractPrompt(notes: string, course?: string, limit = 12): strin
     // Page F also yielded "language", "set" and "nums", all genuinely on the
     // page and all useless. The stop list catches the worst, but asking is
     // cheaper than filtering and catches the ones no list anticipates.
+    'Skip anything that looks like a misreading of handwriting rather than a',
+    'real term: an odd word you do not recognise as belonging to this subject is',
+    'far more likely to be a transcription slip than something worth explaining.',
+    '',
     'The term must be specific to this subject. Skip ordinary words that would',
     'mean the same thing in any subject: "language" and "set" on their own are',
     'too general, while "formal language" and "set difference" are not.',
@@ -680,10 +684,22 @@ export async function expandTerm(term: string, options: ExpandOptions): Promise<
   return combine(term, candidate, pageContradicts, evidence, agreement, softReason);
 }
 
-/** Expand several terms. Sequential on purpose: one model, one GPU. */
-export async function expandTerms(terms: string[], options: ExpandOptions): Promise<Expansion[]> {
+/**
+ * Expand several terms. Sequential on purpose: one model, one GPU.
+ *
+ * onTerm fires before each one. A page of twelve terms takes over a minute, and
+ * a single progress line naming all twelve does not move for the whole of it,
+ * which is indistinguishable from a hang.
+ */
+export async function expandTerms(
+  terms: string[],
+  options: ExpandOptions & { onTerm?: (term: string, index: number, total: number) => void },
+): Promise<Expansion[]> {
   const out: Expansion[] = [];
-  for (const term of terms) out.push(await expandTerm(term, options));
+  for (const [index, term] of terms.entries()) {
+    options.onTerm?.(term, index + 1, terms.length);
+    out.push(await expandTerm(term, options));
+  }
   return out;
 }
 

@@ -448,13 +448,6 @@ async function expandDraft(
       if (terms.length === 0) continue;
       for (const term of terms) seen.add(term.toLowerCase());
 
-      options.onProgress?.({
-        stage: 'expand',
-        message: `checking ${terms.length} term(s): ${terms.join(', ')}`,
-        page: page.seq + 1,
-        totalPages: usable.length,
-      });
-
       all.push(...await expandTerms(terms, {
         notes,
         course: options.course,
@@ -462,6 +455,14 @@ async function expandDraft(
         samples,
         agreementThreshold,
         research,
+        // Per term rather than per page. Twelve terms is over a minute, and one
+        // line naming all twelve does not move for the whole of it.
+        onTerm: (term, index, total) => options.onProgress?.({
+          stage: 'expand',
+          message: `checking "${term}" (${index} of ${total})`,
+          page: page.seq + 1,
+          totalPages: usable.length,
+        }),
       }));
     }
     return { expansions: all, expansionError: null };
