@@ -135,6 +135,44 @@ exchange is the key exchange.**
 Single use is enforced by a conditional update, so two concurrent redemptions
 cannot both succeed.
 
+### `GET /devices`  (pc only)
+
+```
+<- 200 { devices: [{ id, role, label, createdAt, lastSeenAt, pendingBlobs }], self }
+```
+
+Desktop only. A phone that can enumerate the account can enumerate the desktop,
+and it has no reason to.
+
+**No key material is ever returned.** A public key is not a secret, but putting
+one in a list invites it into a screenshot, and it identifies a device across
+every account it has ever been on.
+
+`lastSeenAt` is updated on every authenticated request. Without it the list
+cannot tell the phone in your pocket from one paired once and forgotten, which
+is the only question a device list exists to answer.
+
+### `DELETE /devices/:deviceId`  (pc only)
+
+```
+<- 200 { revoked, label, deletedBlobs }
+<- 404 unknown, or belongs to another account
+<- 409 the caller itself, or the only pc on the account
+```
+
+Pending blobs from that device are deleted with it. Nothing will ever ack them
+once it is gone, so they would occupy the account quota until the retention
+sweep. The count comes back so a client can say what was discarded rather than
+destroying work silently.
+
+Three refusals, each of which would otherwise strand somebody:
+
+- **Itself.** Otherwise the obvious button on the obvious screen locks you out.
+- **The last pc.** Nothing would be left that can decrypt a page, and the
+  account could not be repaired from inside the app.
+- **Another account's device is 404, not 403.** A 403 confirms the id exists,
+  which turns this into a way to probe for other people's device ids.
+
 ### `POST /blobs`  (phone only)
 
 ```
