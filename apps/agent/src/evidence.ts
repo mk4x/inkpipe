@@ -40,7 +40,10 @@ export interface Evidence {
   unavailable: string | null;
 }
 
-export type ModelFn = (prompt: string, options?: { temperature?: number }) => Promise<string>;
+export type ModelFn = (
+  prompt: string,
+  options?: { temperature?: number; maxTokens?: number },
+) => Promise<string>;
 
 // ---------------------------------------------------------------------------
 // Prompts

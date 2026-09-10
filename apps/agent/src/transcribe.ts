@@ -21,6 +21,13 @@ export const PROMPT_LADDER: PromptVariant[] = ['minimal', 'base'];
 const PROMPTS: Record<PromptVariant, string[]> = {
   minimal: [
     'Transcribe this handwritten page of notes into Markdown.',
+    // Underlining by hand is deliberate. The owner: "when some word is
+    // underlined, there is a high chance its a word to remember (term) and
+    // probably should google it." Marking it costs one line of prompt and
+    // turns a visual signal into a machine-readable one that survives into
+    // term extraction. Bold is the Markdown for emphasis and renders in
+    // Obsidian, so the note reads correctly even if nothing downstream cares.
+    'If a word or phrase is underlined, write it in **bold**.',
     'Output only the transcription, with no commentary.',
   ],
   base: [
@@ -29,6 +36,7 @@ const PROMPTS: Record<PromptVariant, string[]> = {
     'Rules:',
     '- Output only the transcription. No preamble, no commentary, no summary.',
     '- Preserve the structure: headings, bullets, and indentation.',
+    '- Write any underlined word or phrase in **bold**.',
     '- Do not add any content that is not written on the page.',
     '- If a word is genuinely illegible, write [?] rather than guessing.',
   ],
@@ -167,7 +175,10 @@ export function ollamaTextModel(options: {
   // sentences or a single word, so a large budget only buys rambling.
   const numPredict = options.numPredict ?? 320;
 
-  return async (prompt: string, callOptions?: { temperature?: number }): Promise<string> => {
+  return async (
+    prompt: string,
+    callOptions?: { temperature?: number; maxTokens?: number },
+  ): Promise<string> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -181,7 +192,9 @@ export function ollamaTextModel(options: {
           stream: false,
           options: {
             temperature: callOptions?.temperature ?? 0,
-            num_predict: numPredict,
+            // Per call, because the stages differ by an order of magnitude:
+            // a snippet verdict is one word, rewriting a page is hundreds.
+            num_predict: callOptions?.maxTokens ?? numPredict,
             num_ctx: numCtx,
           },
         }),

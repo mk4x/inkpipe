@@ -19,6 +19,7 @@ import {
 import type { ModelFn } from './evidence.ts';
 import { checkArithmetic, renderArithmeticFlags, type ArithmeticProblem } from './arithmetic.ts';
 import { cleanNotes } from './clean.ts';
+import { completeOpenLists } from './complete.ts';
 
 export interface PageDraft {
   blobId: string;
@@ -266,8 +267,22 @@ async function cleanPages(pages: PageDraft[], options: CollectOptions): Promise<
       glossary: options.glossary,
       model: options.expansion.model,
     });
-    page.cleanMarkdown = result.cleaned ? result.markdown : null;
-    page.cleanReason = result.reason;
+    if (!result.cleaned) {
+      page.cleanMarkdown = null;
+      page.cleanReason = result.reason;
+      continue;
+    }
+
+    // Completing an open list runs AFTER tidying and on the tidied text, so it
+    // sees the final wording. It is a separate pass because inside the clean
+    // prompt it never fired: "do not add new information" is the strongest
+    // rule there and an exception underneath it loses every time.
+    const completed = await completeOpenLists(result.markdown, {
+      course: options.course,
+      model: options.expansion.model,
+    });
+    page.cleanMarkdown = completed.markdown;
+    page.cleanReason = null;
   }
 }
 
@@ -286,36 +301,69 @@ async function expandDraft(
 
   // Failed pages are excluded. Degenerate output is exactly the material that
   // would produce nonsense terms and waste a search query on each.
-  const notes = pages.filter((p) => p.ok).map((p) => p.markdown).join('\n\n').trim();
-  if (notes.length === 0) return { expansions: [], expansionError: null };
+  const usable = pages.filter((p) => p.ok && p.markdown.trim().length > 0);
+  if (usable.length === 0) return { expansions: [], expansionError: null };
 
   const { model, samples, agreementThreshold, maxTermsPerNote, research } = options.expansion;
+  const perPage = maxTermsPerNote ?? 12;
+
+  // PER PAGE, not per note.
+  //
+  // The cap used to apply to the whole session, so a three page note spent
+  // every term on page one and the later pages were never looked up at all.
+  // The owner noticed exactly that: "it only does google searches for a single
+  // page". The cap is what bounds the work, so applying it per page is also
+  // what makes the second and third page get any attention.
+  //
+  // Each page is expanded against ITS OWN transcript, so the contradiction gate
+  // judges an explanation against the page it came from rather than against
+  // four pages of unrelated material.
+  const all: Expansion[] = [];
+  const seen = new Set<string>();
 
   try {
-    options.onProgress?.({ stage: 'terms', message: 'choosing terms worth looking up' });
-    const terms = await extractTerms({
-      notes,
-      course: options.course,
-      model,
-      limit: maxTermsPerNote ?? 12,
-    });
-    if (terms.length === 0) return { expansions: [], expansionError: null };
-    options.onProgress?.({
-      stage: 'expand',
-      message: `checking ${terms.length} term(s): ${terms.join(', ')}`,
-    });
+    for (const page of usable) {
+      const notes = page.markdown;
+      options.onProgress?.({
+        stage: 'terms',
+        message: 'choosing terms worth looking up',
+        page: page.seq + 1,
+        totalPages: usable.length,
+      });
 
-    const expansions = await expandTerms(terms, {
-      notes,
-      course: options.course,
-      model,
-      samples,
-      agreementThreshold,
-      research,
-    });
-    return { expansions, expansionError: null };
+      const terms = (await extractTerms({
+        notes,
+        course: options.course,
+        model,
+        limit: perPage,
+        // A term explained on page one does not need explaining again on page
+        // three, and looking it up twice spends a query for nothing.
+      })).filter((term) => !seen.has(term.toLowerCase()));
+
+      if (terms.length === 0) continue;
+      for (const term of terms) seen.add(term.toLowerCase());
+
+      options.onProgress?.({
+        stage: 'expand',
+        message: `checking ${terms.length} term(s): ${terms.join(', ')}`,
+        page: page.seq + 1,
+        totalPages: usable.length,
+      });
+
+      all.push(...await expandTerms(terms, {
+        notes,
+        course: options.course,
+        model,
+        samples,
+        agreementThreshold,
+        research,
+      }));
+    }
+    return { expansions: all, expansionError: null };
   } catch (error) {
-    return { expansions: [], expansionError: (error as Error).message };
+    // Whatever was finished is kept. Losing four pages of work because page
+    // five timed out would be its own bug.
+    return { expansions: all, expansionError: (error as Error).message };
   }
 }
 

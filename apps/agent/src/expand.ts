@@ -288,6 +288,34 @@ export function parseTerms(raw: string, notes: string, limit: number): string[] 
  *  extraction is safe even when research is switched off. */
 const MAX_TERM_CHARS = 120;
 
+/**
+ * Words the student underlined, which the transcriber writes as bold.
+ *
+ * The owner: "when some word is underlined, there is a high chance its a word
+ * to remember (term) and probably should google it." Underlining by hand costs
+ * effort, so it is a far better signal of what matters than anything a model
+ * infers from the text, and it is free once the transcription preserves it.
+ *
+ * These are not filtered by the general-word stop list. If the student went to
+ * the trouble of underlining "set", they meant that particular "set".
+ */
+export function emphasisedTerms(notes: string, limit: number): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  // Bold only. Single asterisks are ordinary emphasis and appear in prose the
+  // model wrote, whereas double is what the transcription prompt asks for.
+  for (const match of notes.matchAll(/\*\*([^*\n]{2,120})\*\*/g)) {
+    const term = match[1].replace(/[.,;:]+$/, '').trim();
+    const key = normalise(term);
+    if (key.length < 2 || seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 export interface ExtractOptions {
   notes: string;
   course?: string;
@@ -295,16 +323,30 @@ export interface ExtractOptions {
   limit?: number;
 }
 
-/** Ask the model which terms are worth expanding, then discard its inventions. */
+/**
+ * Which terms are worth expanding.
+ *
+ * Underlined words come first and are never dropped by the general-word filter.
+ * The student marked them by hand, which is a stronger signal than anything a
+ * model infers, and it is the one piece of intent the page carries explicitly.
+ * The model then fills the remaining slots.
+ */
 export async function extractTerms(options: ExtractOptions): Promise<string[]> {
   const limit = options.limit ?? 12;
   if (options.notes.trim().length === 0) return [];
+
+  const emphasised = emphasisedTerms(options.notes, limit);
+  if (emphasised.length >= limit) return emphasised;
 
   const raw = await options.model(
     extractPrompt(options.notes, options.course, limit),
     { temperature: 0 },
   );
-  return parseTerms(raw, options.notes, limit);
+
+  const seen = new Set(emphasised.map((t) => normalise(t)));
+  const rest = parseTerms(raw, options.notes, limit).filter((t) => !seen.has(normalise(t)));
+
+  return [...emphasised, ...rest].slice(0, limit);
 }
 
 // ---------------------------------------------------------------------------

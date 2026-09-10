@@ -7,7 +7,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTerms, extractTerms, extractPrompt, isTooGeneral } from '../src/expand.ts';
+import { parseTerms, extractTerms, extractPrompt, isTooGeneral, emphasisedTerms } from '../src/expand.ts';
 
 const NOTES = [
   '# Compiler Construction',
@@ -204,5 +204,70 @@ describe('the extraction prompt', () => {
     assert.match(prompt, /misspell/);
     assert.match(prompt, /Correct spelling only/);
     assert.match(prompt, /Never replace a term with a different one/);
+  });
+});
+
+describe('underlined words are term candidates', () => {
+  // The owner: "when some word is underlined, there is a high chance its a word
+  // to remember (term) and probably should google it." The transcription prompt
+  // writes underlines as bold, which turns a visual signal into one that
+  // survives all the way to term extraction.
+  const EMPHASISED = [
+    '# Formal Languages',
+    '- a **language** is a set of words',
+    '- the **Kleene star** means zero or more',
+    '- ordinary text about alphabets',
+  ].join('\n');
+
+  test('bold terms are found in order', () => {
+    assert.deepEqual(emphasisedTerms(EMPHASISED, 12), ['language', 'Kleene star']);
+  });
+
+  test('an underlined general word survives the stop list', () => {
+    // "language" alone is normally dropped as too general. If the student went
+    // to the trouble of underlining it, they meant that particular one.
+    assert.ok(emphasisedTerms(EMPHASISED, 12).includes('language'));
+    assert.equal(isTooGeneral('language'), true);
+  });
+
+  test('single asterisks are not a signal', () => {
+    // Ordinary emphasis appears in prose the model wrote. Only double
+    // asterisks are what the transcription prompt asks for.
+    assert.deepEqual(emphasisedTerms('this is *italic* not underlined', 12), []);
+  });
+
+  test('duplicates and trailing punctuation are handled', () => {
+    assert.deepEqual(emphasisedTerms('**AST**, and again **AST.**', 12), ['AST']);
+  });
+
+  test('the limit is honoured', () => {
+    assert.equal(emphasisedTerms('**a1** **b2** **c3** **d4**', 2).length, 2);
+  });
+
+  test('extraction puts underlined terms first and asks the model for the rest', async () => {
+    let asked = false;
+    const model = async () => { asked = true; return 'alphabets'; };
+    const terms = await extractTerms({ notes: EMPHASISED, model, limit: 5 });
+
+    assert.equal(terms[0], 'language');
+    assert.equal(terms[1], 'Kleene star');
+    assert.ok(asked, 'the model still fills the remaining slots');
+  });
+
+  test('enough underlined terms means the model is not asked at all', async () => {
+    // Free, and the student's own marking beats anything inferred.
+    let asked = false;
+    const model = async () => { asked = true; return 'x'; };
+    const terms = await extractTerms({ notes: EMPHASISED, model, limit: 2 });
+
+    assert.equal(asked, false);
+    assert.deepEqual(terms, ['language', 'Kleene star']);
+  });
+
+  test('a term is never listed twice when the model also picks it', async () => {
+    const model = async () => 'Kleene star\nalphabets';
+    const terms = await extractTerms({ notes: EMPHASISED, model, limit: 6 });
+    const kleene = terms.filter((t) => t.toLowerCase() === 'kleene star');
+    assert.equal(kleene.length, 1);
   });
 });

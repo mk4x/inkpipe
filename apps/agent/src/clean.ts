@@ -70,12 +70,17 @@ export function cleanPrompt(notes: string, course?: string, glossary: string[] =
     '--- END NOTES ---',
     '',
     'Rewrite these notes so they are easier to read in a month.',
-    '',
     'RULES, in order of importance:',
     '',
     '1. Do NOT add new information. No explanations, no background, no examples',
     '   that are not already there. The result must be about the same length as',
     '   the original, and never much longer.',
+    '',
+    // Completing a list the page leaves open is a SEPARATE pass, in
+    // complete.ts. Tried here first and it did not work: "do not add new
+    // information" is the strongest rule in this prompt, and an exception
+    // underneath it loses every time. The same model completes MoSCoW
+    // perfectly when asked on its own with nothing competing.
     '2. Do NOT correct anything. If a calculation is wrong or a claim is wrong,',
     '   leave it exactly as written. It is a record of what was on the paper.',
     '3. Fix spelling and obvious transcription slips in ordinary words only.',
@@ -162,9 +167,18 @@ export async function cleanNotes(raw: string, options: CleanOptions): Promise<Cl
   try {
     // Temperature 0. This is a rewrite of something that exists, not a sample
     // from a distribution, and creativity is the failure mode.
+    //
+    // The token budget is sized to the page, and getting this wrong is what
+    // broke it in the field. The shared expansion model allows 320 tokens,
+    // which is right for a two-sentence explanation and nowhere near enough to
+    // rewrite a page: the model ran out mid-flow and fell into a repetition
+    // loop, so cleaning was rejected on every page with "54% of lines are
+    // duplicates". Roughly two tokens per word, doubled for headroom, floored
+    // so a short page still has room to gain structure.
+    const budget = Math.min(4096, Math.max(600, words(source) * 4));
     candidate = (await options.model(
       cleanPrompt(source, options.course, options.glossary),
-      { temperature: 0 },
+      { temperature: 0, maxTokens: budget },
     )).trim();
   } catch (error) {
     return { markdown: raw, cleaned: false, reason: `the model failed: ${(error as Error).message}`, growth: 1 };
