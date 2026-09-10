@@ -74,6 +74,15 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
   let refreshing = false;
   let lastError: string | null = null;
 
+  // A ring buffer of what the pipeline is doing.
+  //
+  // A page takes about a minute and a note with expansion several, during
+  // which the interface used to say nothing, which is indistinguishable from a
+  // hang. Polled rather than streamed: the UI already polls status, and a
+  // websocket for a progress line would be a second transport to keep working.
+  const PROGRESS_KEPT = 200;
+  let progress: Array<{ at: string; stage: string; message: string; page?: number; totalPages?: number }> = [];
+
   // Model pulls are multi-gigabyte, so the UI starts one and then polls. A
   // request that blocked for ten minutes would time out in every proxy.
   let pull: {
@@ -516,6 +525,7 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
     const keys = readKeys();
     refreshing = true;
     lastError = null;
+    progress = [];
 
     try {
       const model = options.modelFactory
@@ -535,6 +545,10 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
         formatting: config.formatting,
         model,
         expansion: expansionFor(config),
+        onProgress: (event) => {
+          progress.push({ at: new Date().toISOString(), ...event });
+          if (progress.length > PROGRESS_KEPT) progress = progress.slice(-PROGRESS_KEPT);
+        },
       });
       return reply.send({ drafts: drafts.length });
     } catch (error) {
@@ -544,6 +558,9 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
       refreshing = false;
     }
   });
+
+  /** What the pipeline is doing, for the progress view. */
+  app.get('/api/progress', async () => ({ refreshing, events: progress }));
 
   app.get('/api/drafts', async () => ({
     drafts: drafts.map((draft) => ({
@@ -558,6 +575,8 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
         variantUsed: page.variantUsed,
         failureReason: page.failureReason,
         sanitiserChanges: page.sanitiserChanges,
+        cleanMarkdown: page.cleanMarkdown,
+        cleanReason: page.cleanReason,
         // The preview must show the photograph beside the text, so the image
         // travels to the UI as a data URL rather than a file path.
         imageDataUrl: `data:image/webp;base64,${Buffer.from(page.vaultImage).toString('base64')}`,
@@ -574,6 +593,7 @@ export function createService(options: ServiceOptions = {}): ServiceHandle {
         sources: expansion.sources.map((source) => ({ title: source.title, url: source.url })),
       })),
       expansionError: draft.expansionError,
+      arithmetic: draft.arithmetic,
     })),
   }));
 

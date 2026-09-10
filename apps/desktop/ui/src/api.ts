@@ -63,6 +63,9 @@ export interface PageDraft {
   failureReason: string | null;
   sanitiserChanges: string[];
   imageDataUrl: string;
+  /** The tidied version, or null when it was rejected or cleaning was off. */
+  cleanMarkdown: string | null;
+  cleanReason: string | null;
 }
 
 /** ADR 0003 and ADR 0004. Everything the model added that is not on the page,
@@ -108,6 +111,14 @@ export interface OllamaStatus {
   rejected: Record<string, string>;
 }
 
+export interface ProgressEvent {
+  at: string;
+  stage: string;
+  message: string;
+  page?: number;
+  totalPages?: number;
+}
+
 export interface PullState {
   model: string;
   status: string;
@@ -126,6 +137,7 @@ export const api = {
   revokeDevice: (id: string) =>
     call<{ revoked: string; label: string; deletedBlobs: number }>('DELETE', `/api/devices/${id}`),
   refresh: () => call<{ drafts: number }>('POST', '/api/refresh'),
+  progress: () => call<{ refreshing: boolean; events: ProgressEvent[] }>('GET', '/api/progress'),
   drafts: () => call<{ drafts: Draft[] }>('GET', '/api/drafts'),
   approve: (sessionId: string, body: unknown) =>
     call<{ notePath: string; commitSha: string; acked: number }>(

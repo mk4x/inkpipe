@@ -65,6 +65,12 @@ function textModel(script: {
     calls,
     model: async (prompt: string) => {
       if (script.fail) throw new Error('the expansion model fell over');
+      if (prompt.includes('Rewrite these notes')) {
+        calls.push('clean');
+        // Returning the transcript unchanged is a valid tidy-up and keeps
+        // these tests about expansion rather than about cleaning.
+        return TRANSCRIPT;
+      }
       if (prompt.includes('One term per line')) {
         calls.push('extract');
         return script.terms ?? 'lexical analysis';
@@ -107,7 +113,8 @@ describe('expansion in the pipeline', () => {
     const { model, calls } = textModel({});
     const [draft] = await collect({ model, samples: 1 });
 
-    assert.equal(calls[0], 'extract', 'terms are chosen before anything is explained');
+    assert.equal(calls[0], 'clean', 'the page is tidied first');
+    assert.equal(calls[1], 'extract', 'then terms are chosen, before anything is explained');
     assert.equal(draft.expansions.length, 1);
     assert.equal(draft.expansions[0].term, 'lexical analysis');
     assert.equal(draft.expansions[0].confidence, 'high');

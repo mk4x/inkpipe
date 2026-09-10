@@ -182,6 +182,20 @@ export async function push(root: string, remote = 'origin', branch = 'main'): Pr
       await git(root, ['pull', '--rebase', remote, branch]);
     } catch (rebaseError) {
       await git(root, ['rebase', '--abort']).catch(() => {});
+      const text = (rebaseError as Error).message.toLowerCase();
+
+      // A rebase refuses before it starts when the tree is dirty, and that is
+      // not a conflict. Saying "resolve the conflict" for unstaged changes
+      // sends the reader hunting for conflict markers that do not exist, which
+      // is exactly what it did on a vault that was neither ahead nor behind.
+      if (/unstaged changes|cannot pull with rebase|would be overwritten|please commit or stash/.test(text)) {
+        throw new VaultError(
+          'dirty_tree',
+          'the vault has uncommitted changes of your own, so it cannot be rebased onto the remote. ' +
+          'Commit or stash them in Obsidian or git, then retry. Nothing was pushed.',
+        );
+      }
+
       throw new VaultError(
         'conflict',
         'the vault has diverged from the remote and rebasing hit a conflict. ' +

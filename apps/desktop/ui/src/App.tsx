@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { api, ServiceError, type Status, type Draft, type PageDraft, type DeviceSummary } from './api.ts';
+import { api, ServiceError, type Status, type Draft, type PageDraft, type DeviceSummary, type ProgressEvent } from './api.ts';
 import Wizard from './Wizard.tsx';
 
 export default function App() {
@@ -46,6 +46,67 @@ function Splash({ error }: { error: string | null }) {
       <h1>inkpipe</h1>
       {error ? <p className="bad">{error}</p> : <p className="muted">connecting to the local service...</p>}
     </main>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Progress
+//
+// A page takes about a minute and a note with expansion several, during which
+// the interface said nothing at all. That is indistinguishable from a hang, and
+// the only way to find out was to wait and hope. This is not decoration.
+// ---------------------------------------------------------------------------
+
+function ProgressLog({ active }: { active: boolean }) {
+  const [events, setEvents] = useState<ProgressEvent[]>([]);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const result = await api.progress();
+        if (alive) setEvents(result.events);
+      } catch { /* the next tick will retry */ }
+    };
+    void poll();
+    // A second is fine: these stages take tens of seconds, and a tighter loop
+    // would poll far more often than anything changes.
+    const timer = setInterval(() => void poll(), 1000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [active]);
+
+  if (events.length === 0) return null;
+
+  const last = events[events.length - 1];
+
+  return (
+    <div className="progress">
+      <div className="progress-head" onClick={() => setOpen(!open)}>
+        <strong>{active ? 'Working' : 'Last run'}</strong>
+        <span className="muted">
+          {last.message}
+          {last.page ? ` (page ${last.page} of ${last.totalPages})` : ''}
+        </span>
+        <div className="spacer" />
+        <span className="muted">{open ? 'hide' : `show ${events.length} steps`}</span>
+      </div>
+      {open && (
+        <div className="progress-body">
+          {events.map((event, i) => (
+            <div key={`${event.at}-${i}`} className="progress-line">
+              <span className="muted">{event.at.slice(11, 19)}</span>
+              <span className={`stage ${event.stage}`}>{event.stage}</span>
+              <span>
+                {event.message}
+                {event.page ? ` (page ${event.page}/${event.totalPages})` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -225,14 +286,18 @@ function Dashboard({ status, onChange }: { status: Status; onChange: () => void 
           const r = await api.refresh();
           await loadDrafts();
           setMessage(`${r.drafts} note${r.drafts === 1 ? '' : 's'} ready`);
-        })} disabled={busy !== null || !status.serverReachable}>
-          {busy === 'refresh' ? 'Transcribing...' : 'Collect and transcribe'}
+        })} disabled={busy !== null || !status.serverReachable || (status.pending ?? 0) === 0}>
+          {busy === 'refresh'
+            ? 'Transcribing...'
+            : `Collect (${status.pending ?? 0})`}
         </button>
         <button onClick={() => guarded('push', async () => {
           const r = await api.push();
           setMessage(`vault ${r.outcome}`);
         })} disabled={busy !== null}>Push vault</button>
       </section>
+
+      <ProgressLog active={busy === 'refresh' || (status.refreshing ?? false)} />
 
       {message && <p className="good">{message}</p>}
       {error && <p className="bad">{error}</p>}
@@ -470,16 +535,46 @@ function PagePane({ page, index, total, value, verdict, onVerdict, onChange }: {
           {verdict === 'bad' ? 'Marked as bad' : 'This came out wrong'}
         </button>
       </div>
-      <div className="pane-body">
-        {/* The photograph sits beside the text so a wrong transcription is
-            visible rather than merely possible. */}
-        <img src={page.imageDataUrl} alt={`page ${index + 1}`} />
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          spellCheck={false}
-          placeholder={page.ok ? '' : 'This page could not be transcribed. Type it yourself, or leave it blank and keep the photograph.'}
-        />
+      {/* Three panes: the photograph, what was literally on it, and the tidied
+          version. Keeping the raw column is the whole reason cleaning is safe
+          to do at all, since it is the record of what was on the paper and the
+          only way to check the tidy-up against it. */}
+      <div className="pane-body three">
+        <figure>
+          <figcaption className="muted">photograph</figcaption>
+          <img src={page.imageDataUrl} alt={`page ${index + 1}`} />
+        </figure>
+
+        <div className="column">
+          <div className="muted">as written</div>
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            spellCheck={false}
+            placeholder={page.ok ? '' : 'This page could not be transcribed. Type it yourself, or leave it blank and keep the photograph.'}
+          />
+        </div>
+
+        <div className="column">
+          <div className="muted">
+            tidied
+            {page.cleanMarkdown ? '' : ' (not available)'}
+          </div>
+          {page.cleanMarkdown
+            ? (
+              // Read only. Editing belongs in the raw column, because that is
+              // what the tidy-up is derived from: editing the output would be
+              // thrown away the moment anything re-ran.
+              <textarea value={page.cleanMarkdown} readOnly spellCheck={false} />
+            )
+            : (
+              <p className="muted">
+                {page.cleanReason
+                  ? `Left as written: ${page.cleanReason}`
+                  : 'Tidying is off. Enable expansion in the config to turn it on.'}
+              </p>
+            )}
+        </div>
       </div>
     </div>
   );

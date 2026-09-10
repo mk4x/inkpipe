@@ -220,3 +220,61 @@ button.danger {
   border-color: #7a2d2d;
   color: #fff;
 }
+
+/* Three panes: photograph, as written, tidied. */
+
+.pane-body.three {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(240px, 1.2fr) minmax(240px, 1.2fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.pane-body.three figure { margin: 0; }
+.pane-body.three figcaption { margin-bottom: 0.25rem; }
+.pane-body.three .column { display: flex; flex-direction: column; gap: 0.25rem; }
+.pane-body.three textarea { min-height: 22rem; width: 100%; }
+
+/* Below this the three columns are unreadably narrow, so they stack. */
+@media (max-width: 1100px) {
+  .pane-body.three { grid-template-columns: 1fr; }
+  .pane-body.three textarea { min-height: 14rem; }
+}
+
+/* Progress log. */
+
+.progress {
+  border: 1px solid #333;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+  font-size: 0.9em;
+}
+
+.progress-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.progress-body {
+  max-height: 14rem;
+  overflow-y: auto;
+  border-top: 1px solid #333;
+  padding: 0.4rem 0.6rem;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.progress-line { display: flex; gap: 0.6rem; padding: 0.1rem 0; }
+
+.stage {
+  min-width: 5.5rem;
+  color: #6ea8fe;
+}
+
+.stage.transcribe { color: #d0a34a; }
+.stage.clean { color: #57a05a; }
+.stage.expand { color: #a06ec9; }
+.stage.done { color: #57a05a; }
